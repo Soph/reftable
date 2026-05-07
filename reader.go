@@ -98,8 +98,7 @@ func (r *Reader) getBlock(off uint64, sz uint32) ([]byte, error) {
 // readHeader reads the header from the given input source.
 func readHeader(r io.Reader, h *header, version int) error {
 	buf := make([]byte, headerSize(version))
-	_, err := r.Read(buf)
-	if err != nil {
+	if _, err := io.ReadFull(r, buf); err != nil {
 		return err
 	}
 	if version == 1 {
