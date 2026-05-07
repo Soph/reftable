@@ -126,6 +126,16 @@ func (r *RefRecord) copyFrom(in record) {
 	*r = *in.(*RefRecord)
 }
 
+// IsDeletion reports whether r encodes a tombstone.
+//
+// TODO: this is a heuristic, not a fact: the on-disk encoding has an
+// explicit value-type field (0 = deletion), but Go's RefRecord does
+// not expose it as a struct field, so we recover it by looking at
+// the data fields. A caller that constructs a RefRecord with all
+// fields zero and intends it as a non-deletion (e.g., to overwrite a
+// previous entry with empty data) will be misclassified here. The C
+// version stores value_type explicitly on the record. Fixing this
+// would change the public API.
 func (r *RefRecord) IsDeletion() bool {
 	return r.Value == nil && r.TargetValue == nil && r.Target == ""
 }
@@ -485,6 +495,14 @@ func (l *LogRecord) typ() byte {
 	return blockTypeLog
 }
 
+// IsDeletion reports whether l encodes a log tombstone.
+//
+// TODO: same caveat as RefRecord.IsDeletion - this is a heuristic
+// because LogRecord does not store the encoded value-type
+// explicitly. A legitimate log entry whose author/committer fields
+// are all empty and whose Time is 0 (the Unix epoch) will be
+// misclassified as a deletion by this method, and round-tripping
+// such a record through encode/decode will lose its data.
 func (l *LogRecord) IsDeletion() bool {
 	return l.New == nil && l.Old == nil && l.Name == "" && l.Email == "" && l.Time == 0 && l.TZOffset == 0 && l.Message == ""
 }

@@ -323,6 +323,13 @@ func (r *Reader) newBlockReader(nextOff uint64, wantTyp byte) (br *blockReader, 
 // nextBlockOff is not a recognized block type byte, isBlockType
 // rejects it; if it is recognized but does not match i.typ,
 // newBlockReader returns (nil, nil) and iteration stops cleanly.
+//
+// TODO: there is still a low-probability false-positive case where a
+// random data byte at nextBlockOff happens to match both isBlockType
+// and the wanted type. The C version (table.c table_iter_next_block)
+// avoids this by tracking explicit per-section end offsets at iter
+// creation time and refusing to advance past them. Plumbing the
+// section bound through tableIter would be a non-trivial change.
 func (i *tableIter) nextBlock() (bool, error) {
 	nextBlockOff := i.blockOff + uint64(i.bi.br.fullBlockSize)
 	br, err := i.r.newBlockReader(nextBlockOff, i.typ)

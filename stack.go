@@ -172,6 +172,11 @@ func (st *Stack) reloadOnce(names []string, reuseOpen bool) error {
 	return nil
 }
 
+// TODO: reload does not cache the (st_dev, st_ino) of tables.list,
+// so it cannot distinguish "tables.list unchanged" from "tables.list
+// was replaced by a file with the same inode after the inode was
+// recycled". The C version (stack.c) caches list_st across reloads
+// to defeat this ABA race. UpToDate has the same exposure.
 func (st *Stack) reload(reuseOpen bool) error {
 	var delay time.Duration
 	deadline := time.Now().Add(5 * time.Second / 2)
