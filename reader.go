@@ -64,7 +64,7 @@ type Reader struct {
 }
 
 func (r *Reader) HashID() HashID {
-	return SHA1ID
+	return r.header.HashID
 }
 
 func (r *Reader) DebugData() string {
