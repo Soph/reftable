@@ -234,6 +234,9 @@ func (w *Writer) AddLog(l *LogRecord) error {
 
 func (w *Writer) add(rec record) error {
 	k := rec.key()
+	if k == "" {
+		return fmt.Errorf("reftable: empty record key")
+	}
 	if w.lastKey >= k {
 		return fmt.Errorf("reftable: keys must be ascending: got %q last %q", rec, w.lastRec)
 	}

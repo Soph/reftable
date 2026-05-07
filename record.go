@@ -421,6 +421,9 @@ func decodeRestartKey(buf []byte, off uint32) (key string, err error) {
 	}
 	buf = buf[s:]
 	l >>= 3
+	if l == 0 {
+		return
+	}
 	if uint64(len(buf)) < l {
 		return
 	}
