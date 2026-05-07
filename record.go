@@ -607,7 +607,6 @@ func (l *LogRecord) decode(buf []byte, key string, valType uint8, hashSize int) 
 	if valType == 0 {
 		return 0, true
 	}
-	buf = buf[n:]
 
 	if len(buf) < 2*hashSize {
 		return
