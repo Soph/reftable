@@ -316,10 +316,14 @@ func (r *Reader) newBlockReader(nextOff uint64, wantTyp byte) (br *blockReader, 
 	return newBlockReader(block, headerOff, r.header.BlockSize, r.hashSize)
 }
 
-// nextBlock moves to the next block, or returns false fi there is none.
+// nextBlock moves to the next block, or returns false if there is none.
+//
+// We rely on newBlockReader's wantTyp check to detect the boundary
+// between block types. If a section ends and the next byte at
+// nextBlockOff is not a recognized block type byte, isBlockType
+// rejects it; if it is recognized but does not match i.typ,
+// newBlockReader returns (nil, nil) and iteration stops cleanly.
 func (i *tableIter) nextBlock() (bool, error) {
-	// XXX this is wrong. If the 'r' block is a followed by a 'g'
-	// block, this will read into random uncompressed data.
 	nextBlockOff := i.blockOff + uint64(i.bi.br.fullBlockSize)
 	br, err := i.r.newBlockReader(nextBlockOff, i.typ)
 	if err != nil {
