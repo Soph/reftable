@@ -222,7 +222,7 @@ func (w *Writer) AddLog(l *LogRecord) error {
 
 	if w.blockWriter != nil && w.blockWriter.getType() == blockTypeRef {
 		if err := w.finishPublicSection(); err != nil {
-			return nil
+			return err
 		}
 	}
 
