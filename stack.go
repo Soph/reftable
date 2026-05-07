@@ -604,8 +604,14 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 	if os.IsExist(err) {
 		return false, nil
 	}
+	if err != nil {
+		return false, err
+	}
 
-	lockFile.Close()
+	if err := lockFile.Close(); err != nil {
+		os.Remove(lockFileName)
+		return false, err
+	}
 	defer func() {
 		if lockFileName != "" {
 			os.Remove(lockFileName)
@@ -634,7 +640,10 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 		if err != nil {
 			return false, err
 		}
-		l.Close()
+		if err := l.Close(); err != nil {
+			os.Remove(subtabLock)
+			return false, err
+		}
 		subtableLocks = append(subtableLocks, subtabLock)
 		deleteOnSuccess = append(deleteOnSuccess, subtab)
 	}
