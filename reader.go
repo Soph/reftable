@@ -181,6 +181,10 @@ func NewReader(src BlockSource, name string) (*Reader, error) {
 		return nil, fmt.Errorf("reftable: got CRC %x, want CRC %x", gotCRC32, wantCRC32)
 	}
 
+	if r.footer.ObjOffset > 0 && r.objectIDLen == 0 {
+		return nil, fmt.Errorf("reftable: object index present but object_id_len is 0")
+	}
+
 	firstBlockTyp := headBlock[headerSize(version)]
 	r.offsets = map[byte]readerOffsets{
 		blockTypeRef: {
