@@ -110,6 +110,14 @@ func readHeader(r io.Reader, h *header, version int) error {
 
 // NewReader creates a reader for a reftable file.
 func NewReader(src BlockSource, name string) (*Reader, error) {
+	srcSize := src.Size()
+	if srcSize == 0 {
+		return nil, fmt.Errorf("reftable: empty table %q", name)
+	}
+	if srcSize < uint64(headerSize(1)+footerSize(1)) {
+		return nil, fmt.Errorf("reftable: file %q is %d bytes, too small for header+footer", name, srcSize)
+	}
+
 	headBlock, err := src.ReadBlock(0, headerSize(2)+1)
 
 	if err != nil {
@@ -124,9 +132,13 @@ func NewReader(src BlockSource, name string) (*Reader, error) {
 		return nil, fmt.Errorf("reftable: unsupported version %d", version)
 	}
 
+	if srcSize < uint64(headerSize(version)+footerSize(version)) {
+		return nil, fmt.Errorf("reftable: file %q is %d bytes, too small for v%d header+footer", name, srcSize, version)
+	}
+
 	r := &Reader{
 		version: version,
-		size:    src.Size() - uint64(footerSize(version)),
+		size:    srcSize - uint64(footerSize(version)),
 		src:     src,
 		name:    name,
 	}
