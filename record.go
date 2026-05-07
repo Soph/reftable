@@ -53,7 +53,7 @@ func getVarInt(buf []byte) (uint64, int) {
 	val := uint64(buf[ptr] & 0x7f)
 	for buf[ptr]&0x80 != 0 {
 		ptr++
-		if ptr > len(buf) {
+		if ptr >= len(buf) {
 			return 0, -1
 		}
 		val = ((val + 1) << 7) | uint64(buf[ptr]&0x7f)
