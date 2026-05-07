@@ -235,7 +235,7 @@ func (w *Writer) AddLog(l *LogRecord) error {
 func (w *Writer) add(rec record) error {
 	k := rec.key()
 	if w.lastKey >= k {
-		log.Panicf("keys must be ascending: got %q last %q", rec, w.lastRec)
+		return fmt.Errorf("reftable: keys must be ascending: got %q last %q", rec, w.lastRec)
 	}
 	w.lastKey = k
 	w.lastRec = rec.String()
@@ -245,7 +245,7 @@ func (w *Writer) add(rec record) error {
 	}
 
 	if t := w.blockWriter.getType(); t != rec.typ() {
-		log.Panicf("add %c on block %c", rec.typ(), t)
+		return fmt.Errorf("reftable: add %c on block %c", rec.typ(), t)
 	}
 	if w.blockWriter.add(rec) {
 		return nil
