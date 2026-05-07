@@ -332,6 +332,9 @@ func (tr *Addition) Add(write func(w *Writer) error) error {
 		return err
 	}
 
+	if err := tab.Sync(); err != nil {
+		return err
+	}
 	if err := tab.Close(); err != nil {
 		return err
 	}
@@ -382,6 +385,10 @@ func (tr *Addition) Commit() error {
 		return err
 	}
 
+	if err := tr.lockFile.Sync(); err != nil {
+		tr.Close()
+		return err
+	}
 	if err := tr.lockFile.Close(); err != nil {
 		tr.Close()
 		return err
@@ -389,6 +396,9 @@ func (tr *Addition) Commit() error {
 	tr.lockFile = nil
 	if err := os.Rename(tr.lockFileName, tr.stack.listFile); err != nil {
 		tr.Close()
+		return err
+	}
+	if err := fsyncDir(tr.stack.reftableDir); err != nil {
 		return err
 	}
 	tr.lockFileName = ""
@@ -434,6 +444,16 @@ func (s *Stack) checkAddition(tabname string) error {
 // non-deterministic random generator.
 var randomRandom = rand.New(rand.NewSource(time.Now().UnixNano()))
 
+// fsyncDir flushes the directory entry for path.
+func fsyncDir(path string) error {
+	d, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
+}
+
 func formatName(min, max uint64) string {
 	return fmt.Sprintf("0x%012x-0x%012x-%08x", min, max, randomRandom.Uint32())
 }
@@ -477,6 +497,9 @@ func (st *Stack) compactLocked(first, last int, expiration *LogExpirationConfig)
 		return "", err
 	}
 
+	if err := tmpTable.Sync(); err != nil {
+		return "", err
+	}
 	if err := tmpTable.Close(); err != nil {
 		return "", err
 	}
@@ -670,12 +693,21 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 		return false, err
 	}
 
+	if err := lockFile.Sync(); err != nil {
+		os.Remove(destTable)
+		return false, err
+	}
+
 	if err := lockFile.Close(); err != nil {
 		os.Remove(destTable)
+		return false, err
 	}
 
 	if err := os.Rename(lockFileName, st.listFile); err != nil {
 		os.Remove(destTable)
+		return false, err
+	}
+	if err := fsyncDir(st.reftableDir); err != nil {
 		return false, err
 	}
 	lockFileName = ""
