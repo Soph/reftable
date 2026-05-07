@@ -196,8 +196,9 @@ func (st *Stack) reload(reuseOpen bool) error {
 			return os.ErrNotExist
 		}
 
-		// compaction changed name
-		delay = time.Millisecond*time.Duration(1+rand.Intn(1)) + 2*delay
+		// compaction changed names; back off and retry.
+		delay = 2*delay + time.Millisecond*time.Duration(1+rand.Intn(2))
+		time.Sleep(delay)
 	}
 
 	var tabs []Table
