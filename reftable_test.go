@@ -25,7 +25,7 @@ func TestTableObjectIDLen(t *testing.T) {
 	var refs []RefRecord
 
 	obj2ref := map[string]string{}
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		h := bytes.Repeat([]byte{'~'}, sha1.Size)
 		h[4] = byte(i)
 
@@ -277,7 +277,7 @@ func testTableSeek(t *testing.T, typ byte, recCount, recSize int, blockSize uint
 	var names []string
 
 	suffix := strings.Repeat("x", recSize)
-	for i := 0; i < recCount; i++ {
+	for i := range recCount {
 		// Put the variable bit in front to kill prefix compression
 		name := fmt.Sprintf("%04d/%s", i, suffix)[:recSize]
 		switch typ {
@@ -411,7 +411,7 @@ func TestTableLogBlocksUnaligned(t *testing.T) {
 	var ls []LogRecord
 
 	N := 50
-	for i := 0; i < N; i++ {
+	for i := range N {
 		ls = append(ls,
 			LogRecord{
 				RefName: fmt.Sprintf("%04d", i),
@@ -442,7 +442,7 @@ func TestTableRefsForLinear(t *testing.T) {
 func testTableRefsFor(t *testing.T, indexed bool) {
 	var refs []RefRecord
 
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		refs = append(refs, RefRecord{
 			RefName:     fmt.Sprintf("%04d/%s", i, strings.Repeat("x", 50))[:40],
 			Value:       testHash(i / 4),
@@ -547,7 +547,7 @@ func TestUnalignedBlock(t *testing.T) {
 	}}
 
 	var logs []LogRecord
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		logs = append(logs, LogRecord{
 			RefName: fmt.Sprintf("branch%02d", i),
 			Message: strings.Repeat("x", 160),

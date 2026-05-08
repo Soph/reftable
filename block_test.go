@@ -30,7 +30,7 @@ func createSeekReader(t *testing.T, typ byte, bs uint32) ([]string, *blockReader
 
 	var names []string
 	N := 30
-	for i := 0; i < N; i++ {
+	for i := range N {
 		names = append(names, fmt.Sprintf("refs/heads/branch%02d", i))
 	}
 	for i, n := range names {

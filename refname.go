@@ -66,7 +66,7 @@ func hasRefWithPrefix(tab Table, additions []string, deletions map[string]bool, 
 }
 
 func validateRefname(name string) bool {
-	for _, comp := range strings.Split(name, "/") {
+	for comp := range strings.SplitSeq(name, "/") {
 		if comp == "." || comp == ".." || comp == "" {
 			return false
 		}

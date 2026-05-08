@@ -690,7 +690,7 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 	}
 
 	var names []string
-	for i := 0; i < first; i++ {
+	for i := range first {
 		names = append(names, st.stack[i].name)
 	}
 
@@ -798,12 +798,12 @@ func sizesToSegments(sizes []uint64) []segment {
 }
 
 /*
-  We play the game of 2048: consecutive tables of the same size (as
-  determined by their log2) are compacted together. We try to combine
-  the result with preceding tables, if they are smaller (as determined
-  by their log2). As a result, if we have N entries, each entry will
-  go into a bigger table in a maximum of log2(N) times, making for
-  log2(N) * N overall cost.
+We play the game of 2048: consecutive tables of the same size (as
+determined by their log2) are compacted together. We try to combine
+the result with preceding tables, if they are smaller (as determined
+by their log2). As a result, if we have N entries, each entry will
+go into a bigger table in a maximum of log2(N) times, making for
+log2(N) * N overall cost.
 */
 func suggestCompactionSegment(sizes []uint64) *segment {
 	segs := sizesToSegments(sizes)

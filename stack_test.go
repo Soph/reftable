@@ -38,7 +38,7 @@ func testStackN(t *testing.T, N int) {
 	}
 
 	refmap := map[string][]byte{}
-	for i := 0; i < N; i++ {
+	for i := range N {
 		if err := st.Add(func(w *Writer) error {
 			r := RefRecord{
 				RefName:     fmt.Sprintf("branch%02d", i),
@@ -99,7 +99,7 @@ func TestAutoCompaction(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for i := 0; i < N; i++ {
+	for i := range N {
 		if err := st.Add(func(w *Writer) error {
 			r := RefRecord{
 				RefName:     fmt.Sprintf("branch%04d", i),
@@ -140,7 +140,7 @@ func TestAutoCompactionConcurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := st1.Add(func(w *Writer) error {
 			r := RefRecord{
 				RefName:     fmt.Sprintf("branch%04d", i),
@@ -197,7 +197,7 @@ func TestAutoCompactionConcurrentUncleanShutdown(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := st1.Add(func(w *Writer) error {
 			r := RefRecord{
 				RefName:     fmt.Sprintf("branch%04d", i),
@@ -273,7 +273,7 @@ func TestMixedHashSize(t *testing.T) {
 	}
 
 	N := 2
-	for i := 0; i < N; i++ {
+	for i := range N {
 		if err := st.Add(func(w *Writer) error {
 			r := RefRecord{
 				RefName:     "branch",
@@ -321,7 +321,7 @@ func TestTombstones(t *testing.T) {
 
 	N := 30 // must be even
 	refmap := map[string][]byte{}
-	for i := 0; i < N; i++ {
+	for i := range N {
 		if err := st.Add(func(w *Writer) error {
 			r := RefRecord{
 				RefName:     "branch",

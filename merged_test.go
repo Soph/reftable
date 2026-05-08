@@ -28,7 +28,7 @@ func TestPQ(t *testing.T) {
 	}
 
 	var names []string
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		names = append(names, fmt.Sprintf("%02d", i))
 	}
 
