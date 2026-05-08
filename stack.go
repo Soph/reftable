@@ -506,13 +506,6 @@ func (st *Stack) compactLocked(first, last int, expiration *LogExpirationConfig)
 		return nil, err
 	}
 
-	if err := tmpTable.Sync(); err != nil {
-		return nil, err
-	}
-	if err := tmpTable.Close(); err != nil {
-		return nil, err
-	}
-
 	result := tmpTable
 	tmpTable = nil
 	return result, nil
@@ -664,6 +657,7 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 	lockFileName = ""
 
 	tmpTable, err := st.compactLocked(first, last, expiration)
+
 	// Compaction + tombstones can create an empty table out of non-empty tables.
 	emptyTable := (errors.Is(err, ErrEmptyTable))
 	if emptyTable {
@@ -672,7 +666,6 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 	if err != nil {
 		return false, err
 	}
-
 	defer func() {
 		if tmpTable != nil {
 			tmpTable.Close()
@@ -696,9 +689,19 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 	destTable := filepath.Join(st.reftableDir, fn)
 
 	if !emptyTable {
+		if tmpTable != nil {
+			if err := tmpTable.Sync(); err != nil {
+				return false, err
+			}
+			if err := tmpTable.Close(); err != nil {
+				return false, err
+			}
+		}
+
 		if err := os.Rename(tmpTable.Name(), destTable); err != nil {
 			return false, err
 		}
+		tmpTable = nil
 	}
 
 	var names []string
