@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"math/rand"
 	"os"
@@ -34,7 +35,7 @@ type CompactionStats struct {
 
 // Stack is an auto-compacting stack of reftables.
 type Stack struct {
-	storage *storage
+	storage Storage
 	cfg     Config
 
 	// mutable
@@ -48,7 +49,7 @@ type Stack struct {
 const listFileName = "tables.list"
 
 // NewStack returns a new stack.
-func NewStack(dir string, cfg Config) (*Stack, error) {
+func NewStack(storage Storage, cfg Config) (*Stack, error) {
 	if cfg.HashID == NullHashID {
 		cfg.HashID = SHA1ID
 	}
@@ -59,7 +60,7 @@ func NewStack(dir string, cfg Config) (*Stack, error) {
 	}
 
 	st := &Stack{
-		storage: &storage{dir},
+		storage: storage,
 		cfg:     cfg,
 	}
 
@@ -79,14 +80,27 @@ func (st *Stack) String() string {
 }
 
 func (st *Stack) readNames() ([]string, error) {
-	c, err := st.storage.ReadFile(listFileName)
-	if os.IsNotExist(err) {
+	bs, err := st.storage.OpenBlockSource(listFileName)
+	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	lines := bytes.Split(c, []byte("\n"))
+	defer bs.Close()
+
+	data, err := bs.ReadBlock(0, int(bs.Size()))
+	if err != nil {
+		log.Printf("err %v %s %d", err, data, bs.Size())
+		return nil, err
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	lines := bytes.Split(data, []byte("\n"))
 
 	var res []string
 	for _, l := range lines {
@@ -311,7 +325,7 @@ func (st *Stack) NewAddition() (*Addition, error) {
 func (tr *Addition) Add(write func(w *Writer) error) error {
 	dest := formatName(tr.nextUpdateIndex, tr.nextUpdateIndex) + ".ref"
 
-	tab, err := tr.stack.storage.NewWriter(dest)
+	tab, err := tr.stack.storage.Update(dest)
 	if err != nil {
 		return err
 	}
@@ -379,9 +393,6 @@ func (tr *Addition) Commit() error {
 		tr.Close()
 		return err
 	}
-	if err := tr.stack.storage.Sync(); err != nil {
-		return err
-	}
 	tr.newTables = nil
 
 	return tr.stack.reload(true)
@@ -424,16 +435,6 @@ func (s *Stack) checkAddition(tabname string) error {
 // non-deterministic random generator.
 var randomRandom = rand.New(rand.NewSource(time.Now().UnixNano()))
 
-// fsyncDir flushes the directory entry for path.
-func fsyncDir(path string) error {
-	d, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	return d.Sync()
-}
-
 func formatName(min, max uint64) string {
 	return fmt.Sprintf("0x%012x-0x%012x-%08x", min, max, randomRandom.Uint32())
 }
@@ -452,7 +453,7 @@ func (st *Stack) compactLocked(first, last int, expiration *LogExpirationConfig)
 	fn := formatName(st.stack[first].MinUpdateIndex(),
 		st.stack[last].MaxUpdateIndex()) + ".ref"
 
-	tmpTable, err := st.storage.NewWriter(fn)
+	tmpTable, err := st.storage.Update(fn)
 	if err != nil {
 		return nil, err
 	}
@@ -664,9 +665,6 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 		return false, err
 	}
 
-	if err := st.storage.Sync(); err != nil {
-		return false, err
-	}
 	for _, nm := range deleteOnSuccess {
 		if tmpTable != nil && nm != tmpTable.Name() {
 			// reflog expiry might cause us to reopen a

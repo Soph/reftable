@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/google/reftable"
 )
@@ -43,7 +44,8 @@ func main() {
 }
 
 func dumpStack(dir string) error {
-	st, err := reftable.NewStack(dir, reftable.Config{})
+	storage := reftable.NewLocalStorage(dir)
+	st, err := reftable.NewStack(storage, reftable.Config{})
 	if err != nil {
 		return err
 	}
@@ -58,7 +60,8 @@ func dumpStack(dir string) error {
 }
 
 func dumpTableFile(nm string) error {
-	f, err := reftable.NewFileBlockSource(nm)
+	storage := reftable.NewLocalStorage(filepath.Dir(nm))
+	f, err := storage.OpenBlockSource(filepath.Base(nm))
 	if err != nil {
 		return err
 	}

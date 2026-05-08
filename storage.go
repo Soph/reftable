@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // AtomicWriter is an abstraction for a {write to temp, close, rename}
@@ -18,6 +16,22 @@ type AtomicWriter interface {
 	Name() string
 	Commit() error
 	Committed() bool
+}
+
+// Storage is the interface for reading and writing a set of files in
+// a flat namespace (ie. single directory)
+type Storage interface {
+	// Like Update(), but use a ".lock" name to block other
+	// writers from writing the same file.  Release the lock by
+	// calling Close().
+	LockForWrite(name string) (AtomicWriter, error)
+
+	// Prepare for updating the given name. The update becomes
+	// visible after calling AtomicWriter.Commit
+	Update(name string) (AtomicWriter, error)
+	ReadDir() ([]fs.DirEntry, error)
+	Remove(name string) error
+	OpenBlockSource(name string) (BlockSource, error)
 }
 
 type fileWriter struct {
@@ -46,6 +60,16 @@ func (fw *fileWriter) Close() error {
 	return cmp.Or(err1, err2)
 }
 
+// fsyncDir flushes the directory entry for path.
+func fsyncDir(path string) error {
+	d, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
+}
+
 func (fw *fileWriter) Commit() error {
 	if err := fw.File.Sync(); err != nil {
 		return err
@@ -56,7 +80,11 @@ func (fw *fileWriter) Commit() error {
 
 	err := os.Rename(fw.File.Name(), fw.finalName)
 	fw.File = nil
-	return err
+	if err != nil {
+		return err
+	}
+
+	return fsyncDir(filepath.Dir(fw.finalName))
 }
 
 func newLockForWrite(path string) (AtomicWriter, error) {
@@ -76,38 +104,31 @@ func newAtomicWriter(path string) (AtomicWriter, error) {
 	return &fileWriter{File: f, finalName: path}, nil
 }
 
-func (s *storage) LockForWrite(name string) (AtomicWriter, error) {
-	if strings.HasPrefix(name, s.reftableDir) {
-		log.Panicf("prefix")
-	}
+func NewLocalStorage(dir string) *localStorage {
+	return &localStorage{dir}
+}
 
+func (s *localStorage) LockForWrite(name string) (AtomicWriter, error) {
 	return newLockForWrite(filepath.Join(s.reftableDir, name))
 }
 
-type storage struct {
+type localStorage struct {
 	reftableDir string
 }
 
-func (s *storage) NewWriter(name string) (AtomicWriter, error) {
-	if strings.HasPrefix(name, s.reftableDir) {
-		log.Panicf("prefix")
-	}
+func (s *localStorage) Update(name string) (AtomicWriter, error) {
 	return newAtomicWriter(filepath.Join(s.reftableDir, name))
 }
 
-func (s *storage) ReadFile(name string) ([]byte, error) {
-	return os.ReadFile(filepath.Join(s.reftableDir, name))
-}
-
-func (s *storage) ReadDir() ([]fs.DirEntry, error) {
+func (s *localStorage) ReadDir() ([]fs.DirEntry, error) {
 	return os.ReadDir(s.reftableDir)
 }
 
-func (s *storage) Sync() error {
+func (s *localStorage) Sync() error {
 	return fsyncDir(s.reftableDir)
 }
 
-func (s *storage) Remove(name string) error {
+func (s *localStorage) Remove(name string) error {
 	return os.Remove(filepath.Join(s.reftableDir, name))
 }
 
@@ -120,10 +141,7 @@ type fileBlockSource struct {
 }
 
 // OpenBlockSource opens a file on local disk as a BlockSource.
-func (s *storage) OpenBlockSource(name string) (BlockSource, error) {
-	if strings.HasPrefix(name, s.reftableDir) {
-		log.Panicf("prefix")
-	}
+func (s *localStorage) OpenBlockSource(name string) (BlockSource, error) {
 	f, err := os.Open(filepath.Join(s.reftableDir, name))
 	if err != nil {
 		return nil, fmt.Errorf("NewFileBlockSource: %w", err)

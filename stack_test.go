@@ -21,6 +21,10 @@ func TestStack(t *testing.T) {
 	testStackN(t, 33)
 }
 
+func newStack(dir string, cfg Config) (*Stack, error) {
+	return NewStack(NewLocalStorage(dir), cfg)
+}
+
 func testStackN(t *testing.T, N int) {
 	dir := t.TempDir()
 
@@ -28,7 +32,7 @@ func testStackN(t *testing.T, N int) {
 		Unaligned: true,
 	}
 
-	st, err := NewStack(dir, cfg)
+	st, err := newStack(dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +90,7 @@ func TestAutoCompaction(t *testing.T) {
 	const N = 1000
 	dir := t.TempDir()
 
-	st, err := NewStack(dir, Config{})
+	st, err := newStack(dir, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +127,7 @@ func TestAutoCompaction(t *testing.T) {
 func TestAutoCompactionConcurrent(t *testing.T) {
 	const N = 2
 	dir := t.TempDir()
-	st1, err := NewStack(dir, Config{})
+	st1, err := newStack(dir, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +149,7 @@ func TestAutoCompactionConcurrent(t *testing.T) {
 		}
 	}
 
-	st2, err := NewStack(dir, Config{})
+	st2, err := newStack(dir, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +180,7 @@ func TestAutoCompactionConcurrent(t *testing.T) {
 func TestAutoCompactionConcurrentUncleanShutdown(t *testing.T) {
 	const N = 2
 	dir := t.TempDir()
-	st1, err := NewStack(dir, Config{})
+	st1, err := newStack(dir, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +202,7 @@ func TestAutoCompactionConcurrentUncleanShutdown(t *testing.T) {
 		}
 	}
 
-	st2, err := NewStack(dir, Config{})
+	st2, err := newStack(dir, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +219,7 @@ func TestAutoCompactionConcurrentUncleanShutdown(t *testing.T) {
 		rd.Close()
 	}
 
-	st3, err := NewStack(dir, Config{})
+	st3, err := newStack(dir, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +251,7 @@ func TestMixedHashSize(t *testing.T) {
 		HashID:    SHA1ID,
 	}
 
-	st, err := NewStack(dir, cfg)
+	st, err := newStack(dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,15 +272,15 @@ func TestMixedHashSize(t *testing.T) {
 		}
 	}
 	defaultConf := Config{}
-	if defaultSt, err := NewStack(dir, defaultConf); err != nil {
-		t.Fatalf("NewStack(defaultConf): %v", err)
+	if defaultSt, err := newStack(dir, defaultConf); err != nil {
+		t.Fatalf("newStack(defaultConf): %v", err)
 	} else {
 		defaultSt.Close()
 	}
 
 	cfg2 := cfg
 	cfg2.HashID = SHA256ID
-	if _, err := NewStack(dir, cfg2); err == nil {
+	if _, err := newStack(dir, cfg2); err == nil {
 		t.Fatal("got success; want an error for hash size mismatch")
 	}
 }
@@ -288,7 +292,7 @@ func TestTombstones(t *testing.T) {
 		Unaligned: true,
 	}
 
-	st, err := NewStack(dir, cfg)
+	st, err := newStack(dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +355,7 @@ func TestCompactionReflogExpiry(t *testing.T) {
 		Unaligned: true,
 	}
 
-	st, err := NewStack(dir, cfg)
+	st, err := newStack(dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,7 +438,7 @@ func TestIgnoreEmptyTables(t *testing.T) {
 		Unaligned: true,
 	}
 
-	st, err := NewStack(dir, cfg)
+	st, err := newStack(dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -465,7 +469,7 @@ func TestNameCheck(t *testing.T) {
 		Unaligned: true,
 	}
 
-	st, err := NewStack(dir, cfg)
+	st, err := newStack(dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,7 +520,7 @@ func TestLogLine(t *testing.T) {
 		ExactLogMessage: false,
 	}
 
-	st, err := NewStack(dir, cfg)
+	st, err := newStack(dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
