@@ -142,7 +142,7 @@ func (bs *fileBlockSource) Size() uint64 {
 }
 
 func (bs *fileBlockSource) ReadBlock(off uint64, size int) ([]byte, error) {
-	if off >= bs.sz {
+	if off > bs.sz {
 		return nil, io.EOF
 	}
 	if off+uint64(size) > bs.sz {
