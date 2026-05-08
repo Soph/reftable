@@ -112,23 +112,11 @@ func (m *Merged) HashID() HashID {
 }
 
 // NewMerged creates a reader for a merged reftable.
-//
-// TODO: the update-index ordering check below is stricter than the C
-// version (merged.c), which only collects first_min/last_max but
-// does not require strict increase between adjacent tables. It is
-// not clear whether the C relaxation was an intentional fix or a
-// regression; revisit this and align the two implementations.
 func NewMerged(tabs []Table, hashID [4]byte) (*Merged, error) {
-	var last Table
-	for i, t := range tabs {
-		if last != nil && last.MaxUpdateIndex() >= t.MinUpdateIndex() {
-			return nil, fmt.Errorf("reftable: table %d has min %d, table %d has max %d; indices must be increasing.", i, t.MinUpdateIndex(), i-1, last.MaxUpdateIndex())
-		}
+	for _, t := range tabs {
 		if t.HashID() != hashID {
-			return nil, fmt.Errorf("reftable: table %d has hash ID %q want hash ID %q", i,
-				t.HashID(), hashID)
+			return nil, fmt.Errorf("reftable: table %s has hash ID %q want hash ID %q", t.Name(), t.HashID(), hashID)
 		}
-		last = t
 	}
 
 	return &Merged{
