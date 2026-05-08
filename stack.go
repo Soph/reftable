@@ -34,7 +34,6 @@ type CompactionStats struct {
 
 // Stack is an auto-compacting stack of reftables.
 type Stack struct {
-	listFile    string
 	reftableDir string
 	cfg         Config
 
@@ -46,12 +45,15 @@ type Stack struct {
 	Stats CompactionStats
 }
 
+func (st *Stack) listFile() string {
+	return filepath.Join(st.reftableDir, "tables.list")
+}
+
 // NewStack returns a new stack.
 func NewStack(dir string, cfg Config) (*Stack, error) {
 	if cfg.HashID == NullHashID {
 		cfg.HashID = SHA1ID
 	}
-	listFile := filepath.Join(dir, "tables.list")
 	switch cfg.HashID {
 	case SHA1ID, SHA256ID:
 	default:
@@ -59,7 +61,6 @@ func NewStack(dir string, cfg Config) (*Stack, error) {
 	}
 
 	st := &Stack{
-		listFile:    listFile,
 		reftableDir: dir,
 		cfg:         cfg,
 	}
@@ -80,7 +81,7 @@ func (st *Stack) String() string {
 }
 
 func (st *Stack) readNames() ([]string, error) {
-	c, err := os.ReadFile(st.listFile)
+	c, err := os.ReadFile(st.listFile())
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -285,7 +286,7 @@ type Addition struct {
 func (st *Stack) NewAddition() (*Addition, error) {
 	tr := Addition{
 		stack:        st,
-		lockFileName: st.listFile + ".lock",
+		lockFileName: st.listFile() + ".lock",
 	}
 	var err error
 	tr.lockFile, err = os.OpenFile(tr.lockFileName, os.O_EXCL|os.O_CREATE|os.O_WRONLY, 0644)
@@ -398,7 +399,7 @@ func (tr *Addition) Commit() error {
 		return err
 	}
 	tr.lockFile = nil
-	if err := os.Rename(tr.lockFileName, tr.stack.listFile); err != nil {
+	if err := os.Rename(tr.lockFileName, tr.stack.listFile()); err != nil {
 		tr.Close()
 		return err
 	}
@@ -603,7 +604,7 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 	}
 	st.Stats.Attempts++
 
-	lockFileName := st.listFile + ".lock"
+	lockFileName := st.listFile() + ".lock"
 	lockFile, err := os.OpenFile(lockFileName, os.O_EXCL|os.O_CREATE|os.O_WRONLY, 0644)
 	if os.IsExist(err) {
 		return false, nil
@@ -667,7 +668,7 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 		return false, err
 	}
 
-	lockFileName = st.listFile + ".lock"
+	lockFileName = st.listFile() + ".lock"
 	lockFile, err = os.OpenFile(lockFileName, os.O_EXCL|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return false, err
@@ -716,7 +717,7 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 		return false, err
 	}
 
-	if err := os.Rename(lockFileName, st.listFile); err != nil {
+	if err := os.Rename(lockFileName, st.listFile()); err != nil {
 		os.Remove(destTable)
 		return false, err
 	}
