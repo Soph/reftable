@@ -335,7 +335,7 @@ func (tr *Addition) Add(write func(w *Writer) error) error {
 	}
 
 	if err := wr.Close(); err != nil {
-		if err == ErrEmptyTable {
+		if errors.Is(err, ErrEmptyTable) {
 			return nil
 		}
 		return err
@@ -665,7 +665,7 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 
 	tmpTable, err := st.compactLocked(first, last, expiration)
 	// Compaction + tombstones can create an empty table out of non-empty tables.
-	emptyTable := (err == ErrEmptyTable)
+	emptyTable := (errors.Is(err, ErrEmptyTable))
 	if emptyTable {
 		err = nil
 	}

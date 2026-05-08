@@ -11,6 +11,7 @@ package reftable
 import (
 	"bytes"
 	"crypto/sha1"
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -585,7 +586,7 @@ func TestEmptyTable(t *testing.T) {
 		t.Fatalf("NewWriter: %v", err)
 	}
 	w.SetLimits(1, 1)
-	if err := w.Close(); err != ErrEmptyTable {
+	if err := w.Close(); !errors.Is(err, ErrEmptyTable) {
 		t.Fatalf("Close: got %v, want %v", err, ErrEmptyTable)
 	}
 
