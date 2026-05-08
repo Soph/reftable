@@ -34,8 +34,8 @@ type CompactionStats struct {
 
 // Stack is an auto-compacting stack of reftables.
 type Stack struct {
-	reftableDir string
-	cfg         Config
+	storage *storage
+	cfg     Config
 
 	// mutable
 	stack              []*Reader
@@ -45,9 +45,7 @@ type Stack struct {
 	Stats CompactionStats
 }
 
-func (st *Stack) listFile() string {
-	return filepath.Join(st.reftableDir, "tables.list")
-}
+const listFileName = "tables.list"
 
 // NewStack returns a new stack.
 func NewStack(dir string, cfg Config) (*Stack, error) {
@@ -61,8 +59,8 @@ func NewStack(dir string, cfg Config) (*Stack, error) {
 	}
 
 	st := &Stack{
-		reftableDir: dir,
-		cfg:         cfg,
+		storage: &storage{dir},
+		cfg:     cfg,
 	}
 
 	if err := st.reload(true); err != nil {
@@ -81,7 +79,7 @@ func (st *Stack) String() string {
 }
 
 func (st *Stack) readNames() ([]string, error) {
-	c, err := os.ReadFile(st.listFile())
+	c, err := st.storage.ReadFile(listFileName)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -121,7 +119,7 @@ func (st *Stack) Close() {
 	for _, r := range st.stack {
 		r.Close()
 		if _, ok := nameSet[r.Name()]; len(nameSet) > 0 && !ok {
-			os.Remove(filepath.Join(st.reftableDir, r.Name()))
+			st.storage.Remove(r.Name())
 		}
 	}
 	st.stack = nil
@@ -146,7 +144,7 @@ func (st *Stack) reloadOnce(names []string, reuseOpen bool) error {
 		if reuseOpen && rd != nil {
 			delete(cur, name)
 		} else {
-			bs, err := NewFileBlockSource(filepath.Join(st.reftableDir, name))
+			bs, err := st.storage.OpenBlockSource(name)
 			if err != nil {
 				return err
 			}
@@ -167,7 +165,7 @@ func (st *Stack) reloadOnce(names []string, reuseOpen bool) error {
 
 		// On windows, we may only be able to close after
 		// closing file handles.
-		os.Remove(filepath.Join(st.reftableDir, old.Name()))
+		st.storage.Remove(old.Name())
 	}
 	return nil
 }
@@ -273,8 +271,7 @@ func (st *Stack) add(write func(w *Writer) error) error {
 // Addition is a transaction that adds new tables to the top of the
 // stack.
 type Addition struct {
-	lockFileName    string
-	lockFile        *os.File
+	lockFile        AtomicWriter
 	stack           *Stack
 	names           []string
 	newTables       []string
@@ -285,11 +282,10 @@ type Addition struct {
 // takes a global filesystem lock on the ref database.
 func (st *Stack) NewAddition() (*Addition, error) {
 	tr := Addition{
-		stack:        st,
-		lockFileName: st.listFile() + ".lock",
+		stack: st,
 	}
 	var err error
-	tr.lockFile, err = os.OpenFile(tr.lockFileName, os.O_EXCL|os.O_CREATE|os.O_WRONLY, 0644)
+	tr.lockFile, err = st.storage.LockForWrite(listFileName)
 	if os.IsExist(err) {
 		return nil, ErrLockFailure
 	}
@@ -313,15 +309,15 @@ func (st *Stack) NewAddition() (*Addition, error) {
 // Add calls the given function to write a new table at the top of
 // the stack.
 func (tr *Addition) Add(write func(w *Writer) error) error {
-	fn := formatName(tr.nextUpdateIndex, tr.nextUpdateIndex)
-	tab, err := os.CreateTemp(tr.stack.reftableDir, fn+"-tmp-*.reftmp")
+	dest := formatName(tr.nextUpdateIndex, tr.nextUpdateIndex) + ".ref"
+
+	tab, err := tr.stack.storage.NewWriter(dest)
 	if err != nil {
 		return err
 	}
 	defer func() {
 		if tab != nil {
 			tab.Close()
-			os.Remove(tab.Name())
 		}
 	}()
 
@@ -341,26 +337,17 @@ func (tr *Addition) Add(write func(w *Writer) error) error {
 		return err
 	}
 
-	if err := tr.stack.checkAddition(tab.Name()); err != nil {
-		return err
-	}
 	if wr.minUpdateIndex < tr.nextUpdateIndex {
 		return ErrLockFailure
 	}
 
-	if err := tab.Sync(); err != nil {
-		return err
-	}
-	if err := tab.Close(); err != nil {
+	if err := tr.stack.checkAddition(filepath.Base(tab.Name())); err != nil {
 		return err
 	}
 
-	dest := fn + ".ref"
-	if err := os.Rename(tab.Name(), filepath.Join(tr.stack.reftableDir, dest)); err != nil {
+	if err := tab.Commit(); err != nil {
 		return err
 	}
-
-	tab = nil
 
 	tr.names = append(tr.names, dest)
 	tr.newTables = append(tr.newTables, dest)
@@ -371,16 +358,9 @@ func (tr *Addition) Add(write func(w *Writer) error) error {
 // Close releases all non-committed data from the transaction.
 func (tr *Addition) Close() {
 	for _, nm := range tr.newTables {
-		os.Remove(filepath.Join(tr.stack.reftableDir, nm))
+		tr.stack.storage.Remove(nm)
 	}
-	if tr.lockFile != nil {
-		tr.lockFile.Close()
-		tr.lockFile = nil
-	}
-	if tr.lockFileName != "" {
-		os.Remove(tr.lockFileName)
-		tr.lockFileName = ""
-	}
+	tr.lockFile.Close()
 }
 
 // Commit commits the changes to the database, releasing the lock.
@@ -395,23 +375,13 @@ func (tr *Addition) Commit() error {
 		return err
 	}
 
-	if err := tr.lockFile.Sync(); err != nil {
+	if err := tr.lockFile.Commit(); err != nil {
 		tr.Close()
 		return err
 	}
-	if err := tr.lockFile.Close(); err != nil {
-		tr.Close()
+	if err := tr.stack.storage.Sync(); err != nil {
 		return err
 	}
-	if err := os.Rename(tr.lockFileName, tr.stack.listFile()); err != nil {
-		tr.Close()
-		return err
-	}
-	tr.lockFile = nil
-	if err := fsyncDir(tr.stack.reftableDir); err != nil {
-		return err
-	}
-	tr.lockFileName = ""
 	tr.newTables = nil
 
 	return tr.stack.reload(true)
@@ -421,7 +391,7 @@ func (s *Stack) checkAddition(tabname string) error {
 	if s.cfg.SkipNameCheck {
 		return nil
 	}
-	bs, err := NewFileBlockSource(tabname)
+	bs, err := s.storage.OpenBlockSource(tabname)
 	if err != nil {
 		return err
 	}
@@ -478,18 +448,17 @@ func (st *Stack) NextUpdateIndex() uint64 {
 
 // compactLocked writes the compacted version of tables [first,last]
 // into a temporary file, whose name is returned.
-func (st *Stack) compactLocked(first, last int, expiration *LogExpirationConfig) (*os.File, error) {
+func (st *Stack) compactLocked(first, last int, expiration *LogExpirationConfig) (AtomicWriter, error) {
 	fn := formatName(st.stack[first].MinUpdateIndex(),
-		st.stack[last].MaxUpdateIndex())
+		st.stack[last].MaxUpdateIndex()) + ".ref"
 
-	tmpTable, err := os.CreateTemp(st.reftableDir, fn+"_*.reftmp")
+	tmpTable, err := st.storage.NewWriter(fn)
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
 		if tmpTable != nil {
 			tmpTable.Close()
-			os.Remove(tmpTable.Name())
 		}
 	}()
 
@@ -602,8 +571,7 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 	}
 	st.Stats.Attempts++
 
-	lockFileName := st.listFile() + ".lock"
-	lockFile, err := os.OpenFile(lockFileName, os.O_EXCL|os.O_CREATE|os.O_WRONLY, 0644)
+	lock, err := st.storage.LockForWrite(listFileName)
 	if os.IsExist(err) {
 		return false, nil
 	}
@@ -611,14 +579,8 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 		return false, err
 	}
 
-	if err := lockFile.Close(); err != nil {
-		os.Remove(lockFileName)
-		return false, err
-	}
 	defer func() {
-		if lockFileName != "" {
-			os.Remove(lockFileName)
-		}
+		lock.Close()
 	}()
 
 	if ok, err := st.UpToDate(); !ok || err != nil {
@@ -626,16 +588,15 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 	}
 
 	var deleteOnSuccess []string
-	var subtableLocks []string
+	var subtableLocks []AtomicWriter
 	defer func() {
 		for _, l := range subtableLocks {
-			os.Remove(l)
+			l.Close()
 		}
 	}()
 	for i := first; i <= last; i++ {
-		subtab := filepath.Join(st.reftableDir, st.stack[i].name)
-		subtabLock := subtab + ".lock"
-		l, err := os.OpenFile(subtabLock, os.O_EXCL|os.O_CREATE|os.O_WRONLY, 0644)
+		subtab := st.stack[i].name
+		subtabLock, err := st.storage.LockForWrite(subtab)
 
 		if os.IsExist(err) {
 			return false, nil
@@ -643,65 +604,38 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 		if err != nil {
 			return false, err
 		}
-		if err := l.Close(); err != nil {
-			os.Remove(subtabLock)
-			return false, err
-		}
 		subtableLocks = append(subtableLocks, subtabLock)
 		deleteOnSuccess = append(deleteOnSuccess, subtab)
 	}
 
-	if err := os.Remove(lockFileName); err != nil {
-		return false, err
-	}
-	lockFileName = ""
+	lock.Close()
 
 	tmpTable, err := st.compactLocked(first, last, expiration)
 
 	// Compaction + tombstones can create an empty table out of non-empty tables.
-	emptyTable := (errors.Is(err, ErrEmptyTable))
-	if emptyTable {
+	if errors.Is(err, ErrEmptyTable) {
+		// In this case, we may have tmpTable == nil
 		err = nil
 	}
+
 	if err != nil {
 		return false, err
 	}
-	defer func() {
-		if tmpTable != nil {
-			tmpTable.Close()
-			os.Remove(tmpTable.Name())
-		}
-	}()
+	if tmpTable != nil {
+		defer tmpTable.Close()
+	}
 
-	lockFileName = st.listFile() + ".lock"
-	lockFile, err = os.OpenFile(lockFileName, os.O_EXCL|os.O_CREATE|os.O_WRONLY, 0644)
+	lock, err = st.storage.LockForWrite(listFileName)
 	if err != nil {
 		return false, err
 	}
 
-	defer lockFile.Close()
+	defer lock.Close()
 
-	fn := formatName(
-		st.stack[first].MinUpdateIndex(),
-		st.stack[last].MaxUpdateIndex())
-
-	fn += ".ref"
-	destTable := filepath.Join(st.reftableDir, fn)
-
-	if !emptyTable {
-		if tmpTable != nil {
-			if err := tmpTable.Sync(); err != nil {
-				return false, err
-			}
-			if err := tmpTable.Close(); err != nil {
-				return false, err
-			}
-		}
-
-		if err := os.Rename(tmpTable.Name(), destTable); err != nil {
+	if tmpTable != nil {
+		if err := tmpTable.Commit(); err != nil {
 			return false, err
 		}
-		tmpTable = nil
 	}
 
 	var names []string
@@ -709,39 +643,32 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 		names = append(names, st.stack[i].name)
 	}
 
-	if !emptyTable {
-		names = append(names, fn)
+	if tmpTable != nil {
+		names = append(names, tmpTable.Name())
 	}
 
 	for i := last + 1; i < len(st.stack); i++ {
 		names = append(names, st.stack[i].name)
 	}
 
-	if _, err := lockFile.Write([]byte(strings.Join(names, "\n"))); err != nil {
-		os.Remove(destTable)
+	if _, err := lock.Write([]byte(strings.Join(names, "\n"))); err != nil {
+		if tmpTable != nil {
+			os.Remove(tmpTable.Name())
+		}
+		return false, err
+	}
+	if err := lock.Commit(); err != nil {
+		if tmpTable != nil {
+			os.Remove(tmpTable.Name())
+		}
 		return false, err
 	}
 
-	if err := lockFile.Sync(); err != nil {
-		os.Remove(destTable)
+	if err := st.storage.Sync(); err != nil {
 		return false, err
 	}
-
-	if err := lockFile.Close(); err != nil {
-		os.Remove(destTable)
-		return false, err
-	}
-
-	if err := os.Rename(lockFileName, st.listFile()); err != nil {
-		os.Remove(destTable)
-		return false, err
-	}
-	if err := fsyncDir(st.reftableDir); err != nil {
-		return false, err
-	}
-	lockFileName = ""
 	for _, nm := range deleteOnSuccess {
-		if nm != destTable {
+		if tmpTable != nil && nm != tmpTable.Name() {
 			// reflog expiry might cause us to reopen a
 			// new file with the same name.
 			os.Remove(nm)
@@ -751,7 +678,9 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 	// If we expire log entries on a full compaction we write a
 	// table with the same the (min,max) update index, but we have
 	// to read from disk again.
-	err = st.reload(expiration == nil)
+	if err := st.reload(expiration == nil); err != nil {
+		return true, fmt.Errorf("reload: %w", err)
+	}
 	return true, err
 }
 
@@ -885,7 +814,7 @@ func (st *Stack) Clean() error {
 	for _, r := range st.stack {
 		names[r.Name()] = struct{}{}
 	}
-	entries, err := os.ReadDir(st.reftableDir)
+	entries, err := st.storage.ReadDir()
 	if err != nil {
 		return err
 	}
@@ -900,8 +829,7 @@ func (st *Stack) Clean() error {
 			continue
 		}
 
-		fn := filepath.Join(st.reftableDir, name)
-		bs, err := NewFileBlockSource(fn)
+		bs, err := st.storage.OpenBlockSource(name)
 		if err != nil {
 			return err
 		}
@@ -914,7 +842,7 @@ func (st *Stack) Clean() error {
 		cur := rd.MaxUpdateIndex()
 		rd.Close()
 		if cur <= max {
-			os.Remove(fn)
+			st.storage.Remove(name)
 		}
 	}
 	return nil
