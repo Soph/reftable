@@ -318,8 +318,12 @@ func (tr *Addition) Add(write func(w *Writer) error) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tab.Name())
-	defer tab.Close()
+	defer func() {
+		if tab != nil {
+			tab.Close()
+			os.Remove(tab.Name())
+		}
+	}()
 
 	wr, err := NewWriter(tab, &tr.stack.cfg)
 	if err != nil {
@@ -337,6 +341,13 @@ func (tr *Addition) Add(write func(w *Writer) error) error {
 		return err
 	}
 
+	if err := tr.stack.checkAddition(tab.Name()); err != nil {
+		return err
+	}
+	if wr.minUpdateIndex < tr.nextUpdateIndex {
+		return ErrLockFailure
+	}
+
 	if err := tab.Sync(); err != nil {
 		return err
 	}
@@ -344,21 +355,15 @@ func (tr *Addition) Add(write func(w *Writer) error) error {
 		return err
 	}
 
-	if wr.minUpdateIndex < tr.nextUpdateIndex {
-		return ErrLockFailure
-	}
-
-	if err := tr.stack.checkAddition(tab.Name()); err != nil {
+	dest := fn + ".ref"
+	if err := os.Rename(tab.Name(), filepath.Join(tr.stack.reftableDir, dest)); err != nil {
 		return err
 	}
 
-	dest := fn + ".ref"
+	tab = nil
+
 	tr.names = append(tr.names, dest)
 	tr.newTables = append(tr.newTables, dest)
-	dest = filepath.Join(tr.stack.reftableDir, dest)
-	if err := os.Rename(tab.Name(), dest); err != nil {
-		return err
-	}
 	tr.nextUpdateIndex = wr.maxUpdateIndex + 1
 	return nil
 }
@@ -398,11 +403,11 @@ func (tr *Addition) Commit() error {
 		tr.Close()
 		return err
 	}
-	tr.lockFile = nil
 	if err := os.Rename(tr.lockFileName, tr.stack.listFile()); err != nil {
 		tr.Close()
 		return err
 	}
+	tr.lockFile = nil
 	if err := fsyncDir(tr.stack.reftableDir); err != nil {
 		return err
 	}
