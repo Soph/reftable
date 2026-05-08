@@ -478,44 +478,44 @@ func (st *Stack) NextUpdateIndex() uint64 {
 
 // compactLocked writes the compacted version of tables [first,last]
 // into a temporary file, whose name is returned.
-func (st *Stack) compactLocked(first, last int, expiration *LogExpirationConfig) (string, error) {
+func (st *Stack) compactLocked(first, last int, expiration *LogExpirationConfig) (*os.File, error) {
 	fn := formatName(st.stack[first].MinUpdateIndex(),
 		st.stack[last].MaxUpdateIndex())
 
 	tmpTable, err := os.CreateTemp(st.reftableDir, fn+"_*.reftmp")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	defer tmpTable.Close()
-	rmName := tmpTable.Name()
 	defer func() {
-		if rmName != "" {
-			os.Remove(rmName)
+		if tmpTable != nil {
+			tmpTable.Close()
+			os.Remove(tmpTable.Name())
 		}
 	}()
 
 	wr, err := NewWriter(tmpTable, &st.cfg)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if err := st.writeCompact(wr, first, last, expiration); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if err := wr.Close(); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if err := tmpTable.Sync(); err != nil {
-		return "", err
+		return nil, err
 	}
 	if err := tmpTable.Close(); err != nil {
-		return "", err
+		return nil, err
 	}
 
-	rmName = ""
-	return tmpTable.Name(), nil
+	result := tmpTable
+	tmpTable = nil
+	return result, nil
 }
 
 func (st *Stack) writeCompact(wr *Writer, first, last int, expiration *LogExpirationConfig) error {
@@ -673,6 +673,13 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 		return false, err
 	}
 
+	defer func() {
+		if tmpTable != nil {
+			tmpTable.Close()
+			os.Remove(tmpTable.Name())
+		}
+	}()
+
 	lockFileName = st.listFile() + ".lock"
 	lockFile, err = os.OpenFile(lockFileName, os.O_EXCL|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
@@ -689,7 +696,7 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 	destTable := filepath.Join(st.reftableDir, fn)
 
 	if !emptyTable {
-		if err := os.Rename(tmpTable, destTable); err != nil {
+		if err := os.Rename(tmpTable.Name(), destTable); err != nil {
 			return false, err
 		}
 	}
