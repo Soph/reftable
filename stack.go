@@ -12,7 +12,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"math/rand"
 	"os"
@@ -81,7 +80,7 @@ func (st *Stack) String() string {
 }
 
 func (st *Stack) readNames() ([]string, error) {
-	c, err := ioutil.ReadFile(st.listFile)
+	c, err := os.ReadFile(st.listFile)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -314,7 +313,7 @@ func (st *Stack) NewAddition() (*Addition, error) {
 // the stack.
 func (tr *Addition) Add(write func(w *Writer) error) error {
 	fn := formatName(tr.nextUpdateIndex, tr.nextUpdateIndex)
-	tab, err := ioutil.TempFile(tr.stack.reftableDir, fn+"-tmp-*.reftmp")
+	tab, err := os.CreateTemp(tr.stack.reftableDir, fn+"-tmp-*.reftmp")
 	if err != nil {
 		return err
 	}
@@ -477,7 +476,7 @@ func (st *Stack) compactLocked(first, last int, expiration *LogExpirationConfig)
 	fn := formatName(st.stack[first].MinUpdateIndex(),
 		st.stack[last].MaxUpdateIndex())
 
-	tmpTable, err := ioutil.TempFile(st.reftableDir, fn+"_*.reftmp")
+	tmpTable, err := os.CreateTemp(st.reftableDir, fn+"_*.reftmp")
 	if err != nil {
 		return "", err
 	}
@@ -870,7 +869,7 @@ func (st *Stack) Clean() error {
 	for _, r := range st.stack {
 		names[r.Name()] = struct{}{}
 	}
-	entries, err := ioutil.ReadDir(st.reftableDir)
+	entries, err := os.ReadDir(st.reftableDir)
 	if err != nil {
 		return err
 	}

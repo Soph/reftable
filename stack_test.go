@@ -22,11 +22,7 @@ func TestStack(t *testing.T) {
 }
 
 func testStackN(t *testing.T, N int) {
-	dir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	cfg := Config{
 		Unaligned: true,
@@ -88,11 +84,7 @@ func testStackN(t *testing.T, N int) {
 
 func TestAutoCompaction(t *testing.T) {
 	const N = 1000
-	dir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	st, err := NewStack(dir, Config{})
 	if err != nil {
@@ -130,11 +122,7 @@ func TestAutoCompaction(t *testing.T) {
 
 func TestAutoCompactionConcurrent(t *testing.T) {
 	const N = 2
-	dir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 	st1, err := NewStack(dir, Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -169,7 +157,7 @@ func TestAutoCompactionConcurrent(t *testing.T) {
 	st2.Close()
 	st1.Close()
 
-	entries, err := ioutil.ReadDir(dir)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,11 +175,7 @@ func TestAutoCompactionConcurrent(t *testing.T) {
 
 func TestAutoCompactionConcurrentUncleanShutdown(t *testing.T) {
 	const N = 2
-	dir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 	st1, err := NewStack(dir, Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -239,7 +223,7 @@ func TestAutoCompactionConcurrentUncleanShutdown(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	entries, err := ioutil.ReadDir(dir)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,11 +240,7 @@ func TestAutoCompactionConcurrentUncleanShutdown(t *testing.T) {
 }
 
 func TestMixedHashSize(t *testing.T) {
-	dir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	cfg := Config{
 		Unaligned: true,
@@ -302,11 +282,7 @@ func TestMixedHashSize(t *testing.T) {
 }
 
 func TestTombstones(t *testing.T) {
-	dir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	cfg := Config{
 		Unaligned: true,
@@ -369,11 +345,7 @@ func TestSuggestCompactionSegment(t *testing.T) {
 }
 
 func TestCompactionReflogExpiry(t *testing.T) {
-	dir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	cfg := Config{
 		Unaligned: true,
@@ -456,11 +428,7 @@ func TestCompactionReflogExpiry(t *testing.T) {
 }
 
 func TestIgnoreEmptyTables(t *testing.T) {
-	dir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	cfg := Config{
 		Unaligned: true,
@@ -478,7 +446,7 @@ func TestIgnoreEmptyTables(t *testing.T) {
 		t.Fatal("Add", err)
 	}
 
-	entries, err := ioutil.ReadDir(dir)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal("ReadDir", err)
 	} else if len(entries) != 0 {
@@ -491,11 +459,7 @@ func TestIgnoreEmptyTables(t *testing.T) {
 }
 
 func TestNameCheck(t *testing.T) {
-	dir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	cfg := Config{
 		Unaligned: true,
