@@ -187,7 +187,7 @@ func (st *Stack) reload(reuseOpen bool) error {
 		if err == nil {
 			break
 		}
-		if !os.IsNotExist(err) {
+		if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		after, err := st.readNames()
@@ -286,7 +286,7 @@ func (st *Stack) NewAddition() (*Addition, error) {
 	}
 	var err error
 	tr.lockFile, err = st.storage.LockForWrite(listFileName)
-	if os.IsExist(err) {
+	if errors.Is(err, os.ErrExist) {
 		return nil, ErrLockFailure
 	}
 	if err != nil {
@@ -572,7 +572,7 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 	st.Stats.Attempts++
 
 	lock, err := st.storage.LockForWrite(listFileName)
-	if os.IsExist(err) {
+	if errors.Is(err, os.ErrExist) {
 		return false, nil
 	}
 	if err != nil {
@@ -598,7 +598,7 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 		subtab := st.stack[i].name
 		subtabLock, err := st.storage.LockForWrite(subtab)
 
-		if os.IsExist(err) {
+		if errors.Is(err, os.ErrExist) {
 			return false, nil
 		}
 		if err != nil {
