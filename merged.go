@@ -113,16 +113,10 @@ func (m *Merged) HashID() HashID {
 
 // NewMerged creates a reader for a merged reftable.
 func NewMerged(tabs []Table, hashID [4]byte) (*Merged, error) {
-	var last Table
-	for i, t := range tabs {
-		if last != nil && last.MaxUpdateIndex() >= t.MinUpdateIndex() {
-			return nil, fmt.Errorf("reftable: table %d has min %d, table %d has max %d; indices must be increasing.", i, t.MinUpdateIndex(), i-1, last.MaxUpdateIndex())
-		}
+	for _, t := range tabs {
 		if t.HashID() != hashID {
-			return nil, fmt.Errorf("reftable: table %d has hash ID %q want hash ID %q", i,
-				t.HashID(), hashID)
+			return nil, fmt.Errorf("reftable: table %s has hash ID %q want hash ID %q", t.Name(), t.HashID(), hashID)
 		}
-		last = t
 	}
 
 	return &Merged{
@@ -133,7 +127,7 @@ func NewMerged(tabs []Table, hashID [4]byte) (*Merged, error) {
 
 // MaxUpdateIndex implements the Table interface.
 func (m *Merged) MaxUpdateIndex() uint64 {
-	return m.stack[len(m.stack)].MaxUpdateIndex()
+	return m.stack[len(m.stack)-1].MaxUpdateIndex()
 }
 
 // MinUpdateIndex implements the Table interface.

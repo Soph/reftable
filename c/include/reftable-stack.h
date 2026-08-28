@@ -18,6 +18,10 @@ https://developers.google.com/open-source/licenses/bsd
 
  * The reftable_stack automatically compacts files on disk to ensure good
  * amortized performance.
+ *
+ * For windows and other platforms that cannot have open files as rename
+ * destinations, concurrent access from multiple processes needs the rand()
+ * random seed to be randomized.
  */
 struct reftable_stack;
 
@@ -46,7 +50,9 @@ int reftable_addition_add(struct reftable_addition *add,
 					     void *arg),
 			  void *arg);
 
-/* Commits the transaction, releasing the lock. */
+/* Commits the transaction, releasing the lock. After calling this,
+ * reftable_addition_destroy should still be called.
+ */
 int reftable_addition_commit(struct reftable_addition *add);
 
 /* Release all non-committed data from the transaction, and deallocate the
@@ -90,6 +96,9 @@ int reftable_stack_compact_all(struct reftable_stack *st,
 /* heuristically compact unbalanced table stack. */
 int reftable_stack_auto_compact(struct reftable_stack *st);
 
+/* delete stale .ref tables. */
+int reftable_stack_clean(struct reftable_stack *st);
+
 /* convenience function to read a single ref. Returns < 0 for error, 0 for
  * success, and 1 if ref not found. */
 int reftable_stack_read_ref(struct reftable_stack *st, const char *refname,
@@ -112,5 +121,8 @@ struct reftable_compaction_stats {
 /* return statistics for compaction up till now. */
 struct reftable_compaction_stats *
 reftable_stack_compaction_stats(struct reftable_stack *st);
+
+/* print the entire stack represented by the directory */
+int reftable_stack_print_directory(const char *stackdir, uint32_t hash_id);
 
 #endif

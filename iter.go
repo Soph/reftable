@@ -47,10 +47,14 @@ func (fri *filteringRefIterator) Next(rec record) (bool, error) {
 			}
 
 			ok, err := it.NextRef(ref)
-
-			// XXX !ok
-			if !ok || err != nil {
+			if err != nil {
 				return false, err
+			}
+			if !ok {
+				// The ref is no longer present in the
+				// authoritative table; skip it and
+				// continue scanning.
+				continue
 			}
 		}
 

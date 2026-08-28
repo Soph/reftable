@@ -10,6 +10,7 @@ https://developers.google.com/open-source/licenses/bsd
 
 #include "system.h"
 
+#include "reftable-reader.h"
 #include "merged.h"
 #include "basics.h"
 #include "constants.h"
@@ -28,18 +29,46 @@ static void clear_dir(const char *dirname)
 	strbuf_release(&path);
 }
 
-static char *get_tmp_template(const char *prefix)
+static int count_dir_entries(const char *dirname)
+{
+	DIR *dir = opendir(dirname);
+	int len = 0;
+	struct dirent *d;
+	if (dir == NULL)
+		return 0;
+
+	while ((d = readdir(dir))) {
+		if (!strcmp(d->d_name, "..") || !strcmp(d->d_name, "."))
+			continue;
+		len++;
+	}
+	closedir(dir);
+	return len;
+}
+
+/*
+ * Work linenumber into the tempdir, so we can see which tests forget to
+ * cleanup.
+ */
+static char *get_tmp_template(int linenumber)
 {
 	const char *tmp = getenv("TMPDIR");
 	static char template[1024];
-	snprintf(template, sizeof(template) - 1, "%s/%s.XXXXXX",
-		 tmp ? tmp : "/tmp", prefix);
+	snprintf(template, sizeof(template) - 1, "%s/stack_test-%d.XXXXXX",
+		 tmp ? tmp : "/tmp", linenumber);
 	return template;
+}
+
+static char *get_tmp_dir(int linenumber)
+{
+	char *dir = get_tmp_template(linenumber);
+	EXPECT(mkdtemp(dir));
+	return dir;
 }
 
 static void test_read_file(void)
 {
-	char *fn = get_tmp_template(__FUNCTION__);
+	char *fn = get_tmp_template(__LINE__);
 	int fd = mkstemp(fn);
 	char out[1024] = "line1\n\nline2\nline3";
 	int n, err;
@@ -56,7 +85,7 @@ static void test_read_file(void)
 	err = read_lines(fn, &names);
 	EXPECT_ERR(err);
 
-	for (i = 0; names[i] != NULL; i++) {
+	for (i = 0; names[i]; i++) {
 		EXPECT(0 == strcmp(want[i], names[i]));
 	}
 	free_names(names);
@@ -108,7 +137,8 @@ static int write_test_log(struct reftable_writer *wr, void *arg)
 
 static void test_reftable_stack_add_one(void)
 {
-	char *dir = get_tmp_template(__FUNCTION__);
+	char *dir = get_tmp_dir(__LINE__);
+
 	struct reftable_write_options cfg = { 0 };
 	struct reftable_stack *st = NULL;
 	int err;
@@ -120,7 +150,6 @@ static void test_reftable_stack_add_one(void)
 	};
 	struct reftable_ref_record dest = { NULL };
 
-	EXPECT(mkdtemp(dir));
 
 	err = reftable_new_stack(&st, dir, cfg);
 	EXPECT_ERR(err);
@@ -132,6 +161,13 @@ static void test_reftable_stack_add_one(void)
 	EXPECT_ERR(err);
 	EXPECT(0 == strcmp("master", dest.value.symref));
 
+	printf("testing print functionality:\n");
+	err = reftable_stack_print_directory(dir, GIT_SHA1_FORMAT_ID);
+	EXPECT_ERR(err);
+
+	err = reftable_stack_print_directory(dir, GIT_SHA256_FORMAT_ID);
+	EXPECT(err == REFTABLE_FORMAT_ERROR);
+
 	reftable_ref_record_release(&dest);
 	reftable_stack_destroy(st);
 	clear_dir(dir);
@@ -142,7 +178,8 @@ static void test_reftable_stack_uptodate(void)
 	struct reftable_write_options cfg = { 0 };
 	struct reftable_stack *st1 = NULL;
 	struct reftable_stack *st2 = NULL;
-	char *dir = get_tmp_template(__FUNCTION__);
+	char *dir = get_tmp_dir(__LINE__);
+
 	int err;
 	struct reftable_ref_record ref1 = {
 		.refname = "HEAD",
@@ -157,7 +194,6 @@ static void test_reftable_stack_uptodate(void)
 		.value.symref = "master",
 	};
 
-	EXPECT(mkdtemp(dir));
 
 	/* simulate multi-process access to the same stack
 	   by creating two stacks for the same directory.
@@ -186,7 +222,8 @@ static void test_reftable_stack_uptodate(void)
 
 static void test_reftable_stack_transaction_api(void)
 {
-	char *dir = get_tmp_template(__FUNCTION__);
+	char *dir = get_tmp_dir(__LINE__);
+
 	struct reftable_write_options cfg = { 0 };
 	struct reftable_stack *st = NULL;
 	int err;
@@ -200,7 +237,6 @@ static void test_reftable_stack_transaction_api(void)
 	};
 	struct reftable_ref_record dest = { NULL };
 
-	EXPECT(mkdtemp(dir));
 
 	err = reftable_new_stack(&st, dir, cfg);
 	EXPECT_ERR(err);
@@ -233,7 +269,8 @@ static void test_reftable_stack_validate_refname(void)
 	struct reftable_write_options cfg = { 0 };
 	struct reftable_stack *st = NULL;
 	int err;
-	char *dir = get_tmp_template(__FUNCTION__);
+	char *dir = get_tmp_dir(__LINE__);
+
 	int i;
 	struct reftable_ref_record ref = {
 		.refname = "a/b",
@@ -243,7 +280,6 @@ static void test_reftable_stack_validate_refname(void)
 	};
 	char *additions[] = { "a", "a/b/c" };
 
-	EXPECT(mkdtemp(dir));
 	err = reftable_new_stack(&st, dir, cfg);
 	EXPECT_ERR(err);
 
@@ -273,7 +309,8 @@ static int write_error(struct reftable_writer *wr, void *arg)
 
 static void test_reftable_stack_update_index_check(void)
 {
-	char *dir = get_tmp_template(__FUNCTION__);
+	char *dir = get_tmp_dir(__LINE__);
+
 	struct reftable_write_options cfg = { 0 };
 	struct reftable_stack *st = NULL;
 	int err;
@@ -289,7 +326,6 @@ static void test_reftable_stack_update_index_check(void)
 		.value_type = REFTABLE_REF_SYMREF,
 		.value.symref = "master",
 	};
-	EXPECT(mkdtemp(dir));
 
 	err = reftable_new_stack(&st, dir, cfg);
 	EXPECT_ERR(err);
@@ -305,11 +341,11 @@ static void test_reftable_stack_update_index_check(void)
 
 static void test_reftable_stack_lock_failure(void)
 {
-	char *dir = get_tmp_template(__FUNCTION__);
+	char *dir = get_tmp_dir(__LINE__);
+
 	struct reftable_write_options cfg = { 0 };
 	struct reftable_stack *st = NULL;
 	int err, i;
-	EXPECT(mkdtemp(dir));
 
 	err = reftable_new_stack(&st, dir, cfg);
 	EXPECT_ERR(err);
@@ -330,12 +366,12 @@ static void test_reftable_stack_add(void)
 		.exact_log_message = 1,
 	};
 	struct reftable_stack *st = NULL;
-	char *dir = get_tmp_template(__FUNCTION__);
+	char *dir = get_tmp_dir(__LINE__);
+
 	struct reftable_ref_record refs[2] = { { NULL } };
 	struct reftable_log_record logs[2] = { { NULL } };
 	int N = ARRAY_SIZE(refs);
 
-	EXPECT(mkdtemp(dir));
 
 	err = reftable_new_stack(&st, dir, cfg);
 	EXPECT_ERR(err);
@@ -347,14 +383,16 @@ static void test_reftable_stack_add(void)
 		refs[i].refname = xstrdup(buf);
 		refs[i].update_index = i + 1;
 		refs[i].value_type = REFTABLE_REF_VAL1;
-		refs[i].value.val1 = reftable_malloc(SHA1_SIZE);
+		refs[i].value.val1 = reftable_malloc(GIT_SHA1_RAWSZ);
 		set_test_hash(refs[i].value.val1, i);
 
 		logs[i].refname = xstrdup(buf);
 		logs[i].update_index = N + i + 1;
-		logs[i].new_hash = reftable_malloc(SHA1_SIZE);
-		logs[i].email = xstrdup("identity@invalid");
-		set_test_hash(logs[i].new_hash, i);
+		logs[i].value_type = REFTABLE_LOG_UPDATE;
+
+		logs[i].value.update.new_hash = reftable_malloc(GIT_SHA1_RAWSZ);
+		logs[i].value.update.email = xstrdup("identity@invalid");
+		set_test_hash(logs[i].value.update.new_hash, i);
 	}
 
 	for (i = 0; i < N; i++) {
@@ -379,7 +417,8 @@ static void test_reftable_stack_add(void)
 
 		int err = reftable_stack_read_ref(st, refs[i].refname, &dest);
 		EXPECT_ERR(err);
-		EXPECT(reftable_ref_record_equal(&dest, refs + i, SHA1_SIZE));
+		EXPECT(reftable_ref_record_equal(&dest, refs + i,
+						 GIT_SHA1_RAWSZ));
 		reftable_ref_record_release(&dest);
 	}
 
@@ -387,7 +426,8 @@ static void test_reftable_stack_add(void)
 		struct reftable_log_record dest = { NULL };
 		int err = reftable_stack_read_log(st, refs[i].refname, &dest);
 		EXPECT_ERR(err);
-		EXPECT(reftable_log_record_equal(&dest, logs + i, SHA1_SIZE));
+		EXPECT(reftable_log_record_equal(&dest, logs + i,
+						 GIT_SHA1_RAWSZ));
 		reftable_log_record_release(&dest);
 	}
 
@@ -407,16 +447,17 @@ static void test_reftable_stack_log_normalize(void)
 		0,
 	};
 	struct reftable_stack *st = NULL;
-	char *dir = get_tmp_template(__FUNCTION__);
+	char *dir = get_tmp_dir(__LINE__);
 
-	uint8_t h1[SHA1_SIZE] = { 0x01 }, h2[SHA1_SIZE] = { 0x02 };
+	uint8_t h1[GIT_SHA1_RAWSZ] = { 0x01 }, h2[GIT_SHA1_RAWSZ] = { 0x02 };
 
-	struct reftable_log_record input = {
-		.refname = "branch",
-		.update_index = 1,
-		.new_hash = h1,
-		.old_hash = h2,
-	};
+	struct reftable_log_record input = { .refname = "branch",
+					     .update_index = 1,
+					     .value_type = REFTABLE_LOG_UPDATE,
+					     .value = { .update = {
+								.new_hash = h1,
+								.old_hash = h2,
+							} } };
 	struct reftable_log_record dest = {
 		.update_index = 0,
 	};
@@ -425,29 +466,28 @@ static void test_reftable_stack_log_normalize(void)
 		.update_index = 1,
 	};
 
-	EXPECT(mkdtemp(dir));
 	err = reftable_new_stack(&st, dir, cfg);
 	EXPECT_ERR(err);
 
-	input.message = "one\ntwo";
+	input.value.update.message = "one\ntwo";
 	err = reftable_stack_add(st, &write_test_log, &arg);
 	EXPECT(err == REFTABLE_API_ERROR);
 
-	input.message = "one";
+	input.value.update.message = "one";
 	err = reftable_stack_add(st, &write_test_log, &arg);
 	EXPECT_ERR(err);
 
 	err = reftable_stack_read_log(st, input.refname, &dest);
 	EXPECT_ERR(err);
-	EXPECT(0 == strcmp(dest.message, "one\n"));
+	EXPECT(0 == strcmp(dest.value.update.message, "one\n"));
 
-	input.message = "two\n";
+	input.value.update.message = "two\n";
 	arg.update_index = 2;
 	err = reftable_stack_add(st, &write_test_log, &arg);
 	EXPECT_ERR(err);
 	err = reftable_stack_read_log(st, input.refname, &dest);
 	EXPECT_ERR(err);
-	EXPECT(0 == strcmp(dest.message, "two\n"));
+	EXPECT(0 == strcmp(dest.value.update.message, "two\n"));
 
 	/* cleanup */
 	reftable_stack_destroy(st);
@@ -458,7 +498,8 @@ static void test_reftable_stack_log_normalize(void)
 static void test_reftable_stack_tombstone(void)
 {
 	int i = 0;
-	char *dir = get_tmp_template(__FUNCTION__);
+	char *dir = get_tmp_dir(__LINE__);
+
 	struct reftable_write_options cfg = { 0 };
 	struct reftable_stack *st = NULL;
 	int err;
@@ -468,33 +509,38 @@ static void test_reftable_stack_tombstone(void)
 	struct reftable_ref_record dest = { NULL };
 	struct reftable_log_record log_dest = { NULL };
 
-	EXPECT(mkdtemp(dir));
 
 	err = reftable_new_stack(&st, dir, cfg);
 	EXPECT_ERR(err);
 
+	/* even entries add the refs, odd entries delete them. */
 	for (i = 0; i < N; i++) {
 		const char *buf = "branch";
 		refs[i].refname = xstrdup(buf);
 		refs[i].update_index = i + 1;
 		if (i % 2 == 0) {
 			refs[i].value_type = REFTABLE_REF_VAL1;
-			refs[i].value.val1 = reftable_malloc(SHA1_SIZE);
+			refs[i].value.val1 = reftable_malloc(GIT_SHA1_RAWSZ);
 			set_test_hash(refs[i].value.val1, i);
 		}
+
 		logs[i].refname = xstrdup(buf);
 		/* update_index is part of the key. */
 		logs[i].update_index = 42;
 		if (i % 2 == 0) {
-			logs[i].new_hash = reftable_malloc(SHA1_SIZE);
-			set_test_hash(logs[i].new_hash, i);
-			logs[i].email = xstrdup("identity@invalid");
+			logs[i].value_type = REFTABLE_LOG_UPDATE;
+			logs[i].value.update.new_hash =
+				reftable_malloc(GIT_SHA1_RAWSZ);
+			set_test_hash(logs[i].value.update.new_hash, i);
+			logs[i].value.update.email =
+				xstrdup("identity@invalid");
 		}
 	}
 	for (i = 0; i < N; i++) {
 		int err = reftable_stack_add(st, &write_test_ref, &refs[i]);
 		EXPECT_ERR(err);
 	}
+
 	for (i = 0; i < N; i++) {
 		struct write_log_arg arg = {
 			.log = &logs[i],
@@ -534,7 +580,8 @@ static void test_reftable_stack_tombstone(void)
 
 static void test_reftable_stack_hash_id(void)
 {
-	char *dir = get_tmp_template(__FUNCTION__);
+	char *dir = get_tmp_dir(__LINE__);
+
 	struct reftable_write_options cfg = { 0 };
 	struct reftable_stack *st = NULL;
 	int err;
@@ -545,13 +592,12 @@ static void test_reftable_stack_hash_id(void)
 		.value.symref = "target",
 		.update_index = 1,
 	};
-	struct reftable_write_options cfg32 = { .hash_id = SHA256_ID };
+	struct reftable_write_options cfg32 = { .hash_id = GIT_SHA256_FORMAT_ID };
 	struct reftable_stack *st32 = NULL;
 	struct reftable_write_options cfg_default = { 0 };
 	struct reftable_stack *st_default = NULL;
 	struct reftable_ref_record dest = { NULL };
 
-	EXPECT(mkdtemp(dir));
 	err = reftable_new_stack(&st, dir, cfg);
 	EXPECT_ERR(err);
 
@@ -569,7 +615,7 @@ static void test_reftable_stack_hash_id(void)
 	err = reftable_stack_read_ref(st_default, "master", &dest);
 	EXPECT_ERR(err);
 
-	EXPECT(reftable_ref_record_equal(&ref, &dest, SHA1_SIZE));
+	EXPECT(reftable_ref_record_equal(&ref, &dest, GIT_SHA1_RAWSZ));
 	reftable_ref_record_release(&dest);
 	reftable_stack_destroy(st);
 	reftable_stack_destroy(st_default);
@@ -642,7 +688,8 @@ static void test_suggest_compaction_segment_nothing(void)
 
 static void test_reflog_expire(void)
 {
-	char *dir = get_tmp_template(__FUNCTION__);
+	char *dir = get_tmp_dir(__LINE__);
+
 	struct reftable_write_options cfg = { 0 };
 	struct reftable_stack *st = NULL;
 	struct reftable_log_record logs[20] = { { NULL } };
@@ -654,7 +701,6 @@ static void test_reflog_expire(void)
 	};
 	struct reftable_log_record log = { NULL };
 
-	EXPECT(mkdtemp(dir));
 
 	err = reftable_new_stack(&st, dir, cfg);
 	EXPECT_ERR(err);
@@ -665,10 +711,11 @@ static void test_reflog_expire(void)
 
 		logs[i].refname = xstrdup(buf);
 		logs[i].update_index = i;
-		logs[i].time = i;
-		logs[i].new_hash = reftable_malloc(SHA1_SIZE);
-		logs[i].email = xstrdup("identity@invalid");
-		set_test_hash(logs[i].new_hash, i);
+		logs[i].value_type = REFTABLE_LOG_UPDATE;
+		logs[i].value.update.time = i;
+		logs[i].value.update.new_hash = reftable_malloc(GIT_SHA1_RAWSZ);
+		logs[i].value.update.email = xstrdup("identity@invalid");
+		set_test_hash(logs[i].value.update.new_hash, i);
 	}
 
 	for (i = 1; i <= N; i++) {
@@ -722,10 +769,10 @@ static void test_empty_add(void)
 	struct reftable_write_options cfg = { 0 };
 	struct reftable_stack *st = NULL;
 	int err;
-	char *dir = get_tmp_template(__FUNCTION__);
+	char *dir = get_tmp_dir(__LINE__);
+
 	struct reftable_stack *st2 = NULL;
 
-	EXPECT(mkdtemp(dir));
 
 	err = reftable_new_stack(&st, dir, cfg);
 	EXPECT_ERR(err);
@@ -744,10 +791,10 @@ static void test_reftable_stack_auto_compaction(void)
 {
 	struct reftable_write_options cfg = { 0 };
 	struct reftable_stack *st = NULL;
-	char *dir = get_tmp_template(__FUNCTION__);
+	char *dir = get_tmp_dir(__LINE__);
+
 	int err, i;
 	int N = 100;
-	EXPECT(mkdtemp(dir));
 
 	err = reftable_new_stack(&st, dir, cfg);
 	EXPECT_ERR(err);
@@ -775,29 +822,130 @@ static void test_reftable_stack_auto_compaction(void)
 	clear_dir(dir);
 }
 
+static void test_reftable_stack_compaction_concurrent(void)
+{
+	struct reftable_write_options cfg = { 0 };
+	struct reftable_stack *st1 = NULL, *st2 = NULL;
+	char *dir = get_tmp_dir(__LINE__);
+
+	int err, i;
+	int N = 3;
+
+	err = reftable_new_stack(&st1, dir, cfg);
+	EXPECT_ERR(err);
+
+	for (i = 0; i < N; i++) {
+		char name[100];
+		struct reftable_ref_record ref = {
+			.refname = name,
+			.update_index = reftable_stack_next_update_index(st1),
+			.value_type = REFTABLE_REF_SYMREF,
+			.value.symref = "master",
+		};
+		snprintf(name, sizeof(name), "branch%04d", i);
+
+		err = reftable_stack_add(st1, &write_test_ref, &ref);
+		EXPECT_ERR(err);
+	}
+
+	err = reftable_new_stack(&st2, dir, cfg);
+	EXPECT_ERR(err);
+
+	err = reftable_stack_compact_all(st1, NULL);
+	EXPECT_ERR(err);
+
+	reftable_stack_destroy(st1);
+	reftable_stack_destroy(st2);
+
+	EXPECT(count_dir_entries(dir) == 2);
+	clear_dir(dir);
+}
+
+static void unclean_stack_close(struct reftable_stack *st)
+{
+	/* break abstraction boundary to simulate unclean shutdown. */
+	int i = 0;
+	for (; i < st->readers_len; i++) {
+		reftable_reader_free(st->readers[i]);
+	}
+	st->readers_len = 0;
+	FREE_AND_NULL(st->readers);
+}
+
+static void test_reftable_stack_compaction_concurrent_clean(void)
+{
+	struct reftable_write_options cfg = { 0 };
+	struct reftable_stack *st1 = NULL, *st2 = NULL, *st3 = NULL;
+	char *dir = get_tmp_dir(__LINE__);
+
+	int err, i;
+	int N = 3;
+
+	err = reftable_new_stack(&st1, dir, cfg);
+	EXPECT_ERR(err);
+
+	for (i = 0; i < N; i++) {
+		char name[100];
+		struct reftable_ref_record ref = {
+			.refname = name,
+			.update_index = reftable_stack_next_update_index(st1),
+			.value_type = REFTABLE_REF_SYMREF,
+			.value.symref = "master",
+		};
+		snprintf(name, sizeof(name), "branch%04d", i);
+
+		err = reftable_stack_add(st1, &write_test_ref, &ref);
+		EXPECT_ERR(err);
+	}
+
+	err = reftable_new_stack(&st2, dir, cfg);
+	EXPECT_ERR(err);
+
+	err = reftable_stack_compact_all(st1, NULL);
+	EXPECT_ERR(err);
+
+	unclean_stack_close(st1);
+	unclean_stack_close(st2);
+
+	err = reftable_new_stack(&st3, dir, cfg);
+	EXPECT_ERR(err);
+
+	err = reftable_stack_clean(st3);
+	EXPECT_ERR(err);
+	EXPECT(count_dir_entries(dir) == 2);
+
+	reftable_stack_destroy(st1);
+	reftable_stack_destroy(st2);
+	reftable_stack_destroy(st3);
+
+	clear_dir(dir);
+}
+
 int stack_test_main(int argc, const char *argv[])
 {
-	test_reftable_stack_uptodate();
-	test_reftable_stack_transaction_api();
-	test_reftable_stack_hash_id();
-	test_sizes_to_segments_all_equal();
-	test_reftable_stack_auto_compaction();
-	test_reftable_stack_validate_refname();
-	test_reftable_stack_update_index_check();
-	test_reftable_stack_lock_failure();
-	test_reftable_stack_log_normalize();
-	test_reftable_stack_tombstone();
-	test_reftable_stack_add_one();
-	test_empty_add();
-	test_reflog_expire();
-	test_suggest_compaction_segment();
-	test_suggest_compaction_segment_nothing();
-	test_sizes_to_segments();
-	test_sizes_to_segments_empty();
-	test_log2();
-	test_parse_names();
-	test_read_file();
-	test_names_equal();
-	test_reftable_stack_add();
+	RUN_TEST(test_empty_add);
+	RUN_TEST(test_log2);
+	RUN_TEST(test_names_equal);
+	RUN_TEST(test_parse_names);
+	RUN_TEST(test_read_file);
+	RUN_TEST(test_reflog_expire);
+	RUN_TEST(test_reftable_stack_add);
+	RUN_TEST(test_reftable_stack_add_one);
+	RUN_TEST(test_reftable_stack_auto_compaction);
+	RUN_TEST(test_reftable_stack_compaction_concurrent);
+	RUN_TEST(test_reftable_stack_compaction_concurrent_clean);
+	RUN_TEST(test_reftable_stack_hash_id);
+	RUN_TEST(test_reftable_stack_lock_failure);
+	RUN_TEST(test_reftable_stack_log_normalize);
+	RUN_TEST(test_reftable_stack_tombstone);
+	RUN_TEST(test_reftable_stack_transaction_api);
+	RUN_TEST(test_reftable_stack_update_index_check);
+	RUN_TEST(test_reftable_stack_uptodate);
+	RUN_TEST(test_reftable_stack_validate_refname);
+	RUN_TEST(test_sizes_to_segments);
+	RUN_TEST(test_sizes_to_segments_all_equal);
+	RUN_TEST(test_sizes_to_segments_empty);
+	RUN_TEST(test_suggest_compaction_segment);
+	RUN_TEST(test_suggest_compaction_segment_nothing);
 	return 0;
 }

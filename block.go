@@ -333,6 +333,9 @@ func (bi *blockIter) Next(r record) (bool, error) {
 	if !ok {
 		return false, fmtError
 	}
+	if key == "" {
+		return false, fmtError
+	}
 	buf = buf[n:]
 
 	if n, ok := r.decode(buf, key, valType, bi.br.hashSize); !ok {

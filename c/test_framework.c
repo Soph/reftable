@@ -13,11 +13,11 @@ https://developers.google.com/open-source/licenses/bsd
 
 void set_test_hash(uint8_t *p, int i)
 {
-	memset(p, (uint8_t)i, hash_size(SHA1_ID));
+	memset(p, (uint8_t)i, hash_size(GIT_SHA1_FORMAT_ID));
 }
 
-int strbuf_add_void(void *b, const void *data, size_t sz)
+ssize_t strbuf_add_void(void *b, const void *data, size_t sz)
 {
-	strbuf_add((struct strbuf *)b, data, sz);
+	strbuf_add(b, data, sz);
 	return sz;
 }

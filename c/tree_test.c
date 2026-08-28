@@ -24,9 +24,9 @@ struct curry {
 
 static void check_increasing(void *arg, void *key)
 {
-	struct curry *c = (struct curry *)arg;
-	if (c->last != NULL) {
-		assert(test_compare(c->last, key) < 0);
+	struct curry *c = arg;
+	if (c->last) {
+		EXPECT(test_compare(c->last, key) < 0);
 	}
 	c->last = key;
 }
@@ -45,8 +45,8 @@ static void test_tree(void)
 	} while (i != 1);
 
 	for (i = 1; i < ARRAY_SIZE(nodes); i++) {
-		assert(values + i == nodes[i]->key);
-		assert(nodes[i] ==
+		EXPECT(values + i == nodes[i]->key);
+		EXPECT(nodes[i] ==
 		       tree_search(values + i, &root, &test_compare, 0));
 	}
 
@@ -56,6 +56,6 @@ static void test_tree(void)
 
 int tree_test_main(int argc, const char *argv[])
 {
-	test_tree();
+	RUN_TEST(test_tree);
 	return 0;
 }

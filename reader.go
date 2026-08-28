@@ -64,7 +64,7 @@ type Reader struct {
 }
 
 func (r *Reader) HashID() HashID {
-	return SHA1ID
+	return r.header.HashID
 }
 
 func (r *Reader) DebugData() string {
@@ -98,8 +98,7 @@ func (r *Reader) getBlock(off uint64, sz uint32) ([]byte, error) {
 // readHeader reads the header from the given input source.
 func readHeader(r io.Reader, h *header, version int) error {
 	buf := make([]byte, headerSize(version))
-	_, err := r.Read(buf)
-	if err != nil {
+	if _, err := io.ReadFull(r, buf); err != nil {
 		return err
 	}
 	if version == 1 {
@@ -111,6 +110,14 @@ func readHeader(r io.Reader, h *header, version int) error {
 
 // NewReader creates a reader for a reftable file.
 func NewReader(src BlockSource, name string) (*Reader, error) {
+	srcSize := src.Size()
+	if srcSize == 0 {
+		return nil, fmt.Errorf("reftable: empty table %q", name)
+	}
+	if srcSize < uint64(headerSize(1)+footerSize(1)) {
+		return nil, fmt.Errorf("reftable: file %q is %d bytes, too small for header+footer", name, srcSize)
+	}
+
 	headBlock, err := src.ReadBlock(0, headerSize(2)+1)
 
 	if err != nil {
@@ -125,9 +132,13 @@ func NewReader(src BlockSource, name string) (*Reader, error) {
 		return nil, fmt.Errorf("reftable: unsupported version %d", version)
 	}
 
+	if srcSize < uint64(headerSize(version)+footerSize(version)) {
+		return nil, fmt.Errorf("reftable: file %q is %d bytes, too small for v%d header+footer", name, srcSize, version)
+	}
+
 	r := &Reader{
 		version: version,
-		size:    src.Size() - uint64(footerSize(version)),
+		size:    srcSize - uint64(footerSize(version)),
 		src:     src,
 		name:    name,
 	}
@@ -168,6 +179,10 @@ func NewReader(src BlockSource, name string) (*Reader, error) {
 	wantCRC32 := crc32.ChecksumIEEE(footBlock[:footerSize(version)-4])
 	if gotCRC32 != wantCRC32 {
 		return nil, fmt.Errorf("reftable: got CRC %x, want CRC %x", gotCRC32, wantCRC32)
+	}
+
+	if r.footer.ObjOffset > 0 && r.objectIDLen == 0 {
+		return nil, fmt.Errorf("reftable: object index present but object_id_len is 0")
 	}
 
 	firstBlockTyp := headBlock[headerSize(version)]
@@ -301,10 +316,21 @@ func (r *Reader) newBlockReader(nextOff uint64, wantTyp byte) (br *blockReader, 
 	return newBlockReader(block, headerOff, r.header.BlockSize, r.hashSize)
 }
 
-// nextBlock moves to the next block, or returns false fi there is none.
+// nextBlock moves to the next block, or returns false if there is none.
+//
+// We rely on newBlockReader's wantTyp check to detect the boundary
+// between block types. If a section ends and the next byte at
+// nextBlockOff is not a recognized block type byte, isBlockType
+// rejects it; if it is recognized but does not match i.typ,
+// newBlockReader returns (nil, nil) and iteration stops cleanly.
+//
+// TODO: there is still a low-probability false-positive case where a
+// random data byte at nextBlockOff happens to match both isBlockType
+// and the wanted type. The C version (table.c table_iter_next_block)
+// avoids this by tracking explicit per-section end offsets at iter
+// creation time and refusing to advance past them. Plumbing the
+// section bound through tableIter would be a non-trivial change.
 func (i *tableIter) nextBlock() (bool, error) {
-	// XXX this is wrong. If the 'r' block is a followed by a 'g'
-	// block, this will read into random uncompressed data.
 	nextBlockOff := i.blockOff + uint64(i.bi.br.fullBlockSize)
 	br, err := i.r.newBlockReader(nextBlockOff, i.typ)
 	if err != nil {

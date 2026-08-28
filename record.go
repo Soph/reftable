@@ -53,7 +53,7 @@ func getVarInt(buf []byte) (uint64, int) {
 	val := uint64(buf[ptr] & 0x7f)
 	for buf[ptr]&0x80 != 0 {
 		ptr++
-		if ptr > len(buf) {
+		if ptr >= len(buf) {
 			return 0, -1
 		}
 		val = ((val + 1) << 7) | uint64(buf[ptr]&0x7f)
@@ -126,7 +126,12 @@ func (r *RefRecord) copyFrom(in record) {
 	*r = *in.(*RefRecord)
 }
 
+// IsDeletion reports whether r encodes a tombstone.
 func (r *RefRecord) IsDeletion() bool {
+	// We can encode "value not set" with nil, so we don't need a
+	// separate enum to keep track of the value type (deletion,
+	// ref, symref, tag). The C code inlines the hash arrays, so
+	// it needs a separate enum.
 	return r.Value == nil && r.TargetValue == nil && r.Target == ""
 }
 
@@ -421,6 +426,9 @@ func decodeRestartKey(buf []byte, off uint32) (key string, err error) {
 	}
 	buf = buf[s:]
 	l >>= 3
+	if l == 0 {
+		return
+	}
 	if uint64(len(buf)) < l {
 		return
 	}
@@ -482,7 +490,9 @@ func (l *LogRecord) typ() byte {
 	return blockTypeLog
 }
 
+// IsDeletion reports whether l encodes a log tombstone.
 func (l *LogRecord) IsDeletion() bool {
+	// See RefRecord.IsDeletion
 	return l.New == nil && l.Old == nil && l.Name == "" && l.Email == "" && l.Time == 0 && l.TZOffset == 0 && l.Message == ""
 }
 
@@ -604,7 +614,6 @@ func (l *LogRecord) decode(buf []byte, key string, valType uint8, hashSize int) 
 	if valType == 0 {
 		return 0, true
 	}
-	buf = buf[n:]
 
 	if len(buf) < 2*hashSize {
 		return

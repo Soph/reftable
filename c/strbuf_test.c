@@ -20,11 +20,11 @@ static void test_strbuf(void)
 	struct strbuf t = STRBUF_INIT;
 
 	strbuf_addstr(&s, "abc");
-	assert(0 == strcmp("abc", s.buf));
+	EXPECT(0 == strcmp("abc", s.buf));
 
 	strbuf_addstr(&t, "pqr");
 	strbuf_addbuf(&s, &t);
-	assert(0 == strcmp("abcpqr", s.buf));
+	EXPECT(0 == strcmp("abcpqr", s.buf));
 
 	strbuf_release(&s);
 	strbuf_release(&t);
@@ -32,6 +32,6 @@ static void test_strbuf(void)
 
 int strbuf_test_main(int argc, const char *argv[])
 {
-	test_strbuf();
+	RUN_TEST(test_strbuf);
 	return 0;
 }

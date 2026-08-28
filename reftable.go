@@ -8,54 +8,6 @@ https://developers.google.com/open-source/licenses/bsd
 
 package reftable
 
-import (
-	"io"
-	"os"
-)
-
-type fileBlockSource struct {
-	f  *os.File
-	sz uint64
-}
-
-// NewFileBlockSource opens a file on local disk as a BlockSource
-func NewFileBlockSource(name string) (BlockSource, error) {
-	f, err := os.Open(name)
-	if err != nil {
-		return nil, err
-	}
-
-	fi, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-
-	return &fileBlockSource{f, uint64(fi.Size())}, nil
-}
-func (bs *fileBlockSource) Size() uint64 {
-	return bs.sz
-}
-
-func (bs *fileBlockSource) ReadBlock(off uint64, size int) ([]byte, error) {
-	if off >= bs.sz {
-		return nil, io.EOF
-	}
-	if off+uint64(size) > bs.sz {
-		size = int(bs.sz - off)
-	}
-	b := make([]byte, size)
-	n, err := bs.f.ReadAt(b, int64(off))
-	if err != nil {
-		return nil, err
-	}
-
-	return b[:n], nil
-}
-
-func (bs *fileBlockSource) Close() error {
-	return bs.f.Close()
-}
-
 // ReadRef reads a ref record by name.
 func ReadRef(tab Table, name string) (*RefRecord, error) {
 	it, err := tab.SeekRef(name)

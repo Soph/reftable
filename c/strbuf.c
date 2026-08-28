@@ -62,7 +62,7 @@ void strbuf_addstr(struct strbuf *d, const char *s)
 	memcpy(d->buf + l1, s, l2);
 }
 
-void strbuf_addbuf(struct strbuf *s, struct strbuf *a)
+void strbuf_addbuf(struct strbuf *s, const struct strbuf *a)
 {
 	int end = s->len;
 	assert(s->canary == STRBUF_CANARY);
@@ -107,7 +107,7 @@ int strbuf_cmp(const struct strbuf *a, const struct strbuf *b)
 		return 0;
 }
 
-int strbuf_add(struct strbuf *b, const void *data, size_t sz)
+ssize_t strbuf_add(struct strbuf *b, const void *data, size_t sz)
 {
 	assert(b->canary == STRBUF_CANARY);
 	strbuf_grow(b, sz);
@@ -116,4 +116,3 @@ int strbuf_add(struct strbuf *b, const void *data, size_t sz)
 	b->buf[b->len] = 0;
 	return sz;
 }
-

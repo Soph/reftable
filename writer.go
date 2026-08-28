@@ -222,7 +222,7 @@ func (w *Writer) AddLog(l *LogRecord) error {
 
 	if w.blockWriter != nil && w.blockWriter.getType() == blockTypeRef {
 		if err := w.finishPublicSection(); err != nil {
-			return nil
+			return err
 		}
 	}
 
@@ -234,8 +234,11 @@ func (w *Writer) AddLog(l *LogRecord) error {
 
 func (w *Writer) add(rec record) error {
 	k := rec.key()
+	if k == "" {
+		return fmt.Errorf("reftable: empty record key")
+	}
 	if w.lastKey >= k {
-		log.Panicf("keys must be ascending: got %q last %q", rec, w.lastRec)
+		return fmt.Errorf("reftable: keys must be ascending: got %q last %q", rec, w.lastRec)
 	}
 	w.lastKey = k
 	w.lastRec = rec.String()
@@ -245,7 +248,7 @@ func (w *Writer) add(rec record) error {
 	}
 
 	if t := w.blockWriter.getType(); t != rec.typ() {
-		log.Panicf("add %c on block %c", rec.typ(), t)
+		return fmt.Errorf("reftable: add %c on block %c", rec.typ(), t)
 	}
 	if w.blockWriter.add(rec) {
 		return nil
@@ -311,7 +314,7 @@ func (w *Writer) Close() error {
 	return nil
 }
 
-const debug = false
+const debugWriter = false
 
 func (w *Writer) getBlockStats(typ byte) *BlockStats {
 	switch typ {
@@ -358,7 +361,7 @@ func (w *Writer) flushBlock() error {
 	blockStats.Blocks++
 	w.Stats.Blocks++
 
-	if debug {
+	if debugWriter {
 		log.Printf("block %c off %d sz %d (%d)",
 			w.blockWriter.getType(), w.next, len(raw), getU24(raw[w.blockWriter.headerOff+1:]))
 	}

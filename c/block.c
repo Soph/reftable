@@ -13,7 +13,7 @@ https://developers.google.com/open-source/licenses/bsd
 #include "record.h"
 #include "reftable-error.h"
 #include "system.h"
-#include "zlib.h"
+#include <zlib.h>
 
 int header_size(int version)
 {
@@ -132,7 +132,7 @@ done:
 
 int block_writer_finish(struct block_writer *w)
 {
-	int i = 0;
+	int i;
 	for (i = 0; i < w->restart_len; i++) {
 		put_be24(w->buf + w->next, w->restarts[i]);
 		w->next += 3;
@@ -144,23 +144,21 @@ int block_writer_finish(struct block_writer *w)
 
 	if (block_writer_type(w) == BLOCK_TYPE_LOG) {
 		int block_header_skip = 4 + w->header_off;
-		uint8_t *compressed = NULL;
-		int zresult = 0;
 		uLongf src_len = w->next - block_header_skip;
-		size_t dest_cap = src_len;
+		uLongf dest_cap = src_len * 1.001 + 12;
 
-		compressed = reftable_malloc(dest_cap);
+		uint8_t *compressed = reftable_malloc(dest_cap);
 		while (1) {
 			uLongf out_dest_len = dest_cap;
-
-			zresult = compress2(compressed, &out_dest_len,
-					    w->buf + block_header_skip, src_len,
-					    9);
-			if (zresult == Z_BUF_ERROR) {
+			int zresult = compress2(compressed, &out_dest_len,
+						w->buf + block_header_skip,
+						src_len, 9);
+			if (zresult == Z_BUF_ERROR && dest_cap < LONG_MAX) {
 				dest_cap *= 2;
 				compressed =
 					reftable_realloc(compressed, dest_cap);
-				continue;
+				if (compressed)
+					continue;
 			}
 
 			if (Z_OK != zresult) {
@@ -211,10 +209,9 @@ int block_reader_init(struct block_reader *br, struct reftable_block *block,
 		memcpy(uncompressed, block->data, block_header_skip);
 
 		/* Uncompress */
-		if (Z_OK != uncompress_return_consumed(
-				    uncompressed + block_header_skip, &dst_len,
-				    block->data + block_header_skip,
-				    &src_len)) {
+		if (Z_OK !=
+		    uncompress2(uncompressed + block_header_skip, &dst_len,
+				block->data + block_header_skip, &src_len)) {
 			reftable_free(uncompressed);
 			return REFTABLE_ZLIB_ERROR;
 		}
@@ -277,7 +274,7 @@ struct restart_find_args {
 
 static int restart_key_less(size_t idx, void *args)
 {
-	struct restart_find_args *a = (struct restart_find_args *)args;
+	struct restart_find_args *a = args;
 	uint32_t off = block_reader_restart_offset(a->r, idx);
 	struct string_view in = {
 		.buf = a->r->block.data + off,
@@ -431,7 +428,7 @@ void block_writer_release(struct block_writer *bw)
 void reftable_block_done(struct reftable_block *blockp)
 {
 	struct reftable_block_source source = blockp->source;
-	if (blockp != NULL && source.ops != NULL)
+	if (blockp && source.ops)
 		source.ops->return_block(source.arg, blockp);
 	blockp->data = NULL;
 	blockp->len = 0;

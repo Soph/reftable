@@ -19,7 +19,7 @@ struct binsearch_args {
 
 static int binsearch_func(size_t i, void *void_args)
 {
-	struct binsearch_args *args = (struct binsearch_args *)void_args;
+	struct binsearch_args *args = void_args;
 
 	return args->key < args->arr[i];
 }
@@ -62,7 +62,7 @@ static void test_parse_names_normal(void)
 	parse_names(in, strlen(in), &out);
 	EXPECT(!strcmp(out[0], "a"));
 	EXPECT(!strcmp(out[1], "b"));
-	EXPECT(out[2] == NULL);
+	EXPECT(!out[2]);
 	free_names(out);
 }
 
@@ -72,7 +72,7 @@ static void test_parse_names_drop_empty(void)
 	char **out = NULL;
 	parse_names(in, strlen(in), &out);
 	EXPECT(!strcmp(out[0], "a"));
-	EXPECT(out[1] == NULL);
+	EXPECT(!out[1]);
 	free_names(out);
 }
 
@@ -89,10 +89,10 @@ static void test_common_prefix(void)
 
 int basics_test_main(int argc, const char *argv[])
 {
-	test_common_prefix();
-	test_parse_names_normal();
-	test_parse_names_drop_empty();
-	test_binsearch();
-	test_names_length();
+	RUN_TEST(test_common_prefix);
+	RUN_TEST(test_parse_names_normal);
+	RUN_TEST(test_parse_names_drop_empty);
+	RUN_TEST(test_binsearch);
+	RUN_TEST(test_names_length);
 	return 0;
 }

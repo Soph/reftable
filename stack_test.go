@@ -21,26 +21,24 @@ func TestStack(t *testing.T) {
 	testStackN(t, 33)
 }
 
+func newStack(dir string, cfg Config) (*Stack, error) {
+	return NewStack(NewLocalStorage(dir), cfg)
+}
+
 func testStackN(t *testing.T, N int) {
-	dir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(dir+"/reftable", 0755); err != nil {
-		t.Fatal(err)
-	}
+	dir := t.TempDir()
 
 	cfg := Config{
 		Unaligned: true,
 	}
 
-	st, err := NewStack(dir+"/reftable", cfg)
+	st, err := newStack(dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	refmap := map[string][]byte{}
-	for i := 0; i < N; i++ {
+	for i := range N {
 		if err := st.Add(func(w *Writer) error {
 			r := RefRecord{
 				RefName:     fmt.Sprintf("branch%02d", i),
@@ -90,17 +88,14 @@ func testStackN(t *testing.T, N int) {
 
 func TestAutoCompaction(t *testing.T) {
 	const N = 1000
-	dir, err := ioutil.TempDir("", "")
+	dir := t.TempDir()
+
+	st, err := newStack(dir, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	st, err := NewStack(dir, Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for i := 0; i < N; i++ {
+	for i := range N {
 		if err := st.Add(func(w *Writer) error {
 			r := RefRecord{
 				RefName:     fmt.Sprintf("branch%04d", i),
@@ -129,27 +124,140 @@ func TestAutoCompaction(t *testing.T) {
 	}
 }
 
-func TestMixedHashSize(t *testing.T) {
-	dir, err := ioutil.TempDir("", "")
+func TestAutoCompactionConcurrent(t *testing.T) {
+	const N = 2
+	dir := t.TempDir()
+	st1, err := newStack(dir, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Mkdir(dir+"/reftable", 0755); err != nil {
+
+	for i := range 3 {
+		if err := st1.Add(func(w *Writer) error {
+			r := RefRecord{
+				RefName:     fmt.Sprintf("branch%04d", i),
+				Target:      "target",
+				UpdateIndex: st1.NextUpdateIndex(),
+			}
+			w.SetLimits(r.UpdateIndex, r.UpdateIndex)
+			if err := w.AddRef(&r); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("write %d: %v", i, err)
+		}
+	}
+
+	st2, err := newStack(dir, Config{})
+	if err != nil {
 		t.Fatal(err)
 	}
+
+	if err := st1.CompactAll(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	st2.Close()
+	st1.Close()
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(entries) != 2 {
+		var ss []string
+		for _, e := range entries {
+			ss = append(ss, e.Name())
+		}
+
+		t.Fatalf("got %v want 2 entries (tmp=%s)", ss, dir)
+	}
+
+}
+
+func TestAutoCompactionConcurrentUncleanShutdown(t *testing.T) {
+	const N = 2
+	dir := t.TempDir()
+	st1, err := newStack(dir, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range 3 {
+		if err := st1.Add(func(w *Writer) error {
+			r := RefRecord{
+				RefName:     fmt.Sprintf("branch%04d", i),
+				Target:      "target",
+				UpdateIndex: st1.NextUpdateIndex(),
+			}
+			w.SetLimits(r.UpdateIndex, r.UpdateIndex)
+			if err := w.AddRef(&r); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("write %d: %v", i, err)
+		}
+	}
+
+	st2, err := newStack(dir, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st1.CompactAll(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// break abstraction boundary to simulate unclean shutdown
+	for _, rd := range st1.stack {
+		rd.Close()
+	}
+	for _, rd := range st2.stack {
+		rd.Close()
+	}
+
+	st3, err := newStack(dir, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st3.Clean(); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(entries) != 2 {
+		var ss []string
+		for _, e := range entries {
+			ss = append(ss, e.Name())
+		}
+
+		t.Fatalf("got %v want 2 entries (tmp=%s)", ss, dir)
+	}
+
+}
+
+func TestMixedHashSize(t *testing.T) {
+	dir := t.TempDir()
 
 	cfg := Config{
 		Unaligned: true,
 		HashID:    SHA1ID,
 	}
 
-	st, err := NewStack(dir+"/reftable", cfg)
+	st, err := newStack(dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	N := 2
-	for i := 0; i < N; i++ {
+	for i := range N {
 		if err := st.Add(func(w *Writer) error {
 			r := RefRecord{
 				RefName:     "branch",
@@ -164,33 +272,27 @@ func TestMixedHashSize(t *testing.T) {
 		}
 	}
 	defaultConf := Config{}
-	if defaultSt, err := NewStack(dir+"/reftable", defaultConf); err != nil {
-		t.Fatalf("NewStack(defaultConf): %v", err)
+	if defaultSt, err := newStack(dir, defaultConf); err != nil {
+		t.Fatalf("newStack(defaultConf): %v", err)
 	} else {
 		defaultSt.Close()
 	}
 
 	cfg2 := cfg
 	cfg2.HashID = SHA256ID
-	if _, err := NewStack(dir+"/reftable", cfg2); err == nil {
+	if _, err := newStack(dir, cfg2); err == nil {
 		t.Fatal("got success; want an error for hash size mismatch")
 	}
 }
 
 func TestTombstones(t *testing.T) {
-	dir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(dir+"/reftable", 0755); err != nil {
-		t.Fatal(err)
-	}
+	dir := t.TempDir()
 
 	cfg := Config{
 		Unaligned: true,
 	}
 
-	st, err := NewStack(dir+"/reftable", cfg)
+	st, err := newStack(dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +301,7 @@ func TestTombstones(t *testing.T) {
 
 	N := 30 // must be even
 	refmap := map[string][]byte{}
-	for i := 0; i < N; i++ {
+	for i := range N {
 		if err := st.Add(func(w *Writer) error {
 			r := RefRecord{
 				RefName:     "branch",
@@ -247,19 +349,13 @@ func TestSuggestCompactionSegment(t *testing.T) {
 }
 
 func TestCompactionReflogExpiry(t *testing.T) {
-	dir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(dir+"/reftable", 0755); err != nil {
-		t.Fatal(err)
-	}
+	dir := t.TempDir()
 
 	cfg := Config{
 		Unaligned: true,
 	}
 
-	st, err := NewStack(dir+"/reftable", cfg)
+	st, err := newStack(dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,19 +432,13 @@ func TestCompactionReflogExpiry(t *testing.T) {
 }
 
 func TestIgnoreEmptyTables(t *testing.T) {
-	dir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(dir+"/reftable", 0755); err != nil {
-		t.Fatal(err)
-	}
+	dir := t.TempDir()
 
 	cfg := Config{
 		Unaligned: true,
 	}
 
-	st, err := NewStack(dir+"/reftable", cfg)
+	st, err := newStack(dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +450,7 @@ func TestIgnoreEmptyTables(t *testing.T) {
 		t.Fatal("Add", err)
 	}
 
-	entries, err := ioutil.ReadDir(dir + "/reftable")
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal("ReadDir", err)
 	} else if len(entries) != 0 {
@@ -373,19 +463,13 @@ func TestIgnoreEmptyTables(t *testing.T) {
 }
 
 func TestNameCheck(t *testing.T) {
-	dir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(dir+"/reftable", 0755); err != nil {
-		t.Fatal(err)
-	}
+	dir := t.TempDir()
 
 	cfg := Config{
 		Unaligned: true,
 	}
 
-	st, err := NewStack(dir, cfg)
+	st, err := newStack(dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,15 +514,13 @@ func TestLogLine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Mkdir(dir+"/reftable", 0755); err != nil {
-		t.Fatal(err)
-	}
 
+	defer os.RemoveAll(dir)
 	cfg := Config{
 		ExactLogMessage: false,
 	}
 
-	st, err := NewStack(dir, cfg)
+	st, err := newStack(dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

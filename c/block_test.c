@@ -9,7 +9,6 @@ https://developers.google.com/open-source/licenses/bsd
 #include "block.h"
 
 #include "system.h"
-
 #include "blocksource.h"
 #include "basics.h"
 #include "constants.h"
@@ -40,12 +39,12 @@ static void test_block_read_write(void)
 	block.len = block_size;
 	block.source = malloc_block_source();
 	block_writer_init(&bw, BLOCK_TYPE_REF, block.data, block_size,
-			  header_off, hash_size(SHA1_ID));
+			  header_off, hash_size(GIT_SHA1_FORMAT_ID));
 	reftable_record_from_ref(&rec, &ref);
 
 	for (i = 0; i < N; i++) {
 		char name[100];
-		uint8_t hash[SHA1_SIZE];
+		uint8_t hash[GIT_SHA1_RAWSZ];
 		snprintf(name, sizeof(name), "branch%02d", i);
 		memset(hash, i, sizeof(hash));
 
@@ -65,7 +64,7 @@ static void test_block_read_write(void)
 
 	block_writer_release(&bw);
 
-	block_reader_init(&br, &block, header_off, block_size, SHA1_SIZE);
+	block_reader_init(&br, &block, header_off, block_size, GIT_SHA1_RAWSZ);
 
 	block_reader_start(&br, &it);
 
@@ -116,6 +115,6 @@ static void test_block_read_write(void)
 
 int block_test_main(int argc, const char *argv[])
 {
-	test_block_read_write();
+	RUN_TEST(test_block_read_write);
 	return 0;
 }

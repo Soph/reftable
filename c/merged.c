@@ -13,6 +13,7 @@ https://developers.google.com/open-source/licenses/bsd
 #include "pq.h"
 #include "reader.h"
 #include "record.h"
+#include "generic.h"
 #include "reftable-merged.h"
 #include "reftable-error.h"
 #include "system.h"
@@ -44,7 +45,7 @@ static int merged_iter_init(struct merged_iter *mi)
 
 static void merged_iter_close(void *p)
 {
-	struct merged_iter *mi = (struct merged_iter *)p;
+	struct merged_iter *mi = p;
 	int i = 0;
 	merged_iter_pqueue_release(&mi->pq);
 	for (i = 0; i < mi->stack_len; i++) {
@@ -149,7 +150,7 @@ static int merged_iter_next(struct merged_iter *mi, struct reftable_record *rec)
 
 static int merged_iter_next_void(void *p, struct reftable_record *rec)
 {
-	struct merged_iter *mi = (struct merged_iter *)p;
+	struct merged_iter *mi = p;
 	if (merged_iter_pqueue_is_empty(mi->pq))
 		return 1;
 
@@ -164,7 +165,7 @@ static struct reftable_iterator_vtable merged_iter_vtable = {
 static void iterator_from_merged_iter(struct reftable_iterator *it,
 				      struct merged_iter *mi)
 {
-	assert(it->ops == NULL);
+	assert(!it->ops);
 	it->iter_arg = mi;
 	it->ops = &merged_iter_vtable;
 }
@@ -192,8 +193,7 @@ int reftable_new_merged_table(struct reftable_merged_table **dest,
 		}
 	}
 
-	m = (struct reftable_merged_table *)reftable_calloc(
-		sizeof(struct reftable_merged_table));
+	m = reftable_calloc(sizeof(struct reftable_merged_table));
 	m->stack = stack;
 	m->stack_len = n;
 	m->min = first_min;
@@ -212,7 +212,7 @@ void merged_table_release(struct reftable_merged_table *mt)
 
 void reftable_merged_table_free(struct reftable_merged_table *mt)
 {
-	if (mt == NULL) {
+	if (!mt) {
 		return;
 	}
 	merged_table_release(mt);
@@ -328,26 +328,22 @@ static int reftable_merged_table_seek_void(void *tab,
 					   struct reftable_iterator *it,
 					   struct reftable_record *rec)
 {
-	return merged_table_seek_record((struct reftable_merged_table *)tab, it,
-					rec);
+	return merged_table_seek_record(tab, it, rec);
 }
 
 static uint32_t reftable_merged_table_hash_id_void(void *tab)
 {
-	return reftable_merged_table_hash_id(
-		(struct reftable_merged_table *)tab);
+	return reftable_merged_table_hash_id(tab);
 }
 
 static uint64_t reftable_merged_table_min_update_index_void(void *tab)
 {
-	return reftable_merged_table_min_update_index(
-		(struct reftable_merged_table *)tab);
+	return reftable_merged_table_min_update_index(tab);
 }
 
 static uint64_t reftable_merged_table_max_update_index_void(void *tab)
 {
-	return reftable_merged_table_max_update_index(
-		(struct reftable_merged_table *)tab);
+	return reftable_merged_table_max_update_index(tab);
 }
 
 static struct reftable_table_vtable merged_table_vtable = {
@@ -360,7 +356,7 @@ static struct reftable_table_vtable merged_table_vtable = {
 void reftable_table_from_merged_table(struct reftable_table *tab,
 				      struct reftable_merged_table *merged)
 {
-	assert(tab->ops == NULL);
+	assert(!tab->ops);
 	tab->ops = &merged_table_vtable;
 	tab->table_arg = merged;
 }

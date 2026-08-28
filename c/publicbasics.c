@@ -11,23 +11,30 @@ https://developers.google.com/open-source/licenses/bsd
 #include "basics.h"
 #include "system.h"
 
-static void *(*reftable_malloc_ptr)(size_t sz) = &malloc;
-static void *(*reftable_realloc_ptr)(void *, size_t) = &realloc;
-static void (*reftable_free_ptr)(void *) = &free;
+static void *(*reftable_malloc_ptr)(size_t sz);
+static void *(*reftable_realloc_ptr)(void *, size_t);
+static void (*reftable_free_ptr)(void *);
 
 void *reftable_malloc(size_t sz)
 {
-	return (*reftable_malloc_ptr)(sz);
+	if (reftable_malloc_ptr)
+		return (*reftable_malloc_ptr)(sz);
+	return malloc(sz);
 }
 
 void *reftable_realloc(void *p, size_t sz)
 {
-	return (*reftable_realloc_ptr)(p, sz);
+	if (reftable_realloc_ptr)
+		return (*reftable_realloc_ptr)(p, sz);
+	return realloc(p, sz);
 }
 
 void reftable_free(void *p)
 {
-	reftable_free_ptr(p);
+	if (reftable_free_ptr)
+		reftable_free_ptr(p);
+	else
+		free(p);
 }
 
 void *reftable_calloc(size_t sz)
@@ -49,10 +56,10 @@ int hash_size(uint32_t id)
 {
 	switch (id) {
 	case 0:
-	case SHA1_ID:
-		return SHA1_SIZE;
-	case SHA256_ID:
-		return SHA256_SIZE;
+	case GIT_SHA1_FORMAT_ID:
+		return GIT_SHA1_RAWSZ;
+	case GIT_SHA256_FORMAT_ID:
+		return GIT_SHA256_RAWSZ;
 	}
 	abort();
 }

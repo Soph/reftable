@@ -26,7 +26,7 @@ static void strbuf_close(void *b)
 static int strbuf_read_block(void *v, struct reftable_block *dest, uint64_t off,
 			     uint32_t size)
 {
-	struct strbuf *b = (struct strbuf *)v;
+	struct strbuf *b = v;
 	assert(off + size <= b->len);
 	dest->data = reftable_calloc(size);
 	memcpy(dest->data, b->buf + off, size);
@@ -49,7 +49,7 @@ static struct reftable_block_source_vtable strbuf_vtable = {
 void block_source_from_strbuf(struct reftable_block_source *bs,
 			      struct strbuf *buf)
 {
-	assert(bs->ops == NULL);
+	assert(!bs->ops);
 	bs->ops = &strbuf_vtable;
 	bs->arg = buf;
 }
@@ -103,7 +103,7 @@ static void file_close(void *b)
 static int file_read_block(void *v, struct reftable_block *dest, uint64_t off,
 			   uint32_t size)
 {
-	struct file_block_source *b = (struct file_block_source *)v;
+	struct file_block_source *b = v;
 	assert(off + size <= b->size);
 	dest->data = reftable_malloc(size);
 	if (pread(b->fd, dest->data, size, off) != size)
@@ -141,7 +141,7 @@ int reftable_block_source_from_file(struct reftable_block_source *bs,
 	p->size = st.st_size;
 	p->fd = fd;
 
-	assert(bs->ops == NULL);
+	assert(!bs->ops);
 	bs->ops = &file_vtable;
 	bs->arg = p;
 	return 0;

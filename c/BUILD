@@ -36,17 +36,19 @@ cc_library(
         "reader.c",
         "record.c",
         "refname.c",
-        "reftable.c",
+        "generic.c",
         "strbuf.c",
         "stack.c",
         "tree.c",
         "writer.c",
-        "zlib-compat.c",
         "basics.h",
         "block.h",
         "blocksource.h",
+        "generic.h",
         "git-compat-util.h",
         "constants.h",
+        "dir.h",
+        "hash.h",
         "iter.h",
         "merged.h",
         "pq.h",
@@ -109,14 +111,14 @@ cc_test(
 )
 
 cc_test(
-    name = "reftable_test",
-    srcs = ["reftable_test.c"],
+    name = "readwrite_test",
+    srcs = ["readwrite_test.c"],
     deps = [
         ":reftable",
         ":testlib",
     ],
     copts = [
-        "-Dreftable_test_main=main",
+        "-Dreadwrite_test_main=main",
         "-fvisibility=protected",
     ] + GIT_COPTS,
 )
@@ -200,6 +202,19 @@ cc_test(
 )
 
 cc_test(
+    name = "pq_test",
+    srcs = ["pq_test.c"],
+    deps = [
+        ":reftable",
+        ":testlib",
+    ],
+    copts = [
+        "-Dpq_test_main=main",
+        "-fvisibility=protected",
+    ] + GIT_COPTS,
+)
+
+cc_test(
     name = "merged_test",
     srcs = ["merged_test.c"],
     deps = [
@@ -219,6 +234,7 @@ cc_test(
     data = [ t ])
  for t in ["record_test",
            "merged_test",
+           "readwrite_test",
            "refname_test",
            "tree_test",
            "block_test",
