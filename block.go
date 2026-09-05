@@ -175,9 +175,12 @@ func (br *blockReader) getType() byte {
 	return br.block[br.headerOff]
 }
 
-// newBlockWriter prepares for reading a block.
+// newBlockReader prepares for reading a block.
 func newBlockReader(block []byte, headerOff uint32, tableBlockSize uint32, hashSize int) (*blockReader, error) {
 
+	if uint64(headerOff)+4 > uint64(len(block)) {
+		return nil, fmtError
+	}
 	fullBlockSize := tableBlockSize
 	typ := block[headerOff]
 	if !isBlockType(typ) {
@@ -185,6 +188,12 @@ func newBlockReader(block []byte, headerOff uint32, tableBlockSize uint32, hashS
 	}
 
 	sz := getU24(block[headerOff+1:])
+	if uint64(sz) < uint64(headerOff)+6 {
+		return nil, fmtError
+	}
+	if typ != blockTypeLog && uint64(sz) > uint64(len(block)) {
+		return nil, fmtError
+	}
 
 	if typ == blockTypeLog {
 		decompress := make([]byte, 0, sz)
@@ -194,18 +203,21 @@ func newBlockReader(block []byte, headerOff uint32, tableBlockSize uint32, hashS
 		before := buf.Len()
 
 		// Consume header
-		io.CopyN(out, buf, int64(headerOff+4))
+		if _, err := io.CopyN(out, buf, int64(headerOff)+4); err != nil {
+			return nil, err
+		}
 		r, err := zlib.NewReader(buf)
 		if err != nil {
 			return nil, err
 		}
-		// Have to use io.Copy. zlib stream has a terminator,
-		// which we must consume, so go until EOF.
-		if _, err := io.Copy(out, r); err != nil {
+		defer r.Close()
+		// Read one byte beyond the declared payload size to detect oversized
+		// streams without unbounded allocation. Valid streams reach EOF and
+		// consume the zlib trailer, preserving compressed-block accounting.
+		limit := int64(sz) - int64(headerOff) - 4 + 1
+		if _, err := io.Copy(out, io.LimitReader(r, limit)); err != nil {
 			return nil, err
 		}
-
-		r.Close()
 
 		if out.Len() != int(sz) {
 			return nil, fmtError
@@ -228,7 +240,18 @@ func newBlockReader(block []byte, headerOff uint32, tableBlockSize uint32, hashS
 
 	restartCount := binary.BigEndian.Uint16(block[len(block)-2:])
 	restartStart := len(block) - 2 - 3*int(restartCount)
+	if restartStart < int(headerOff)+4 {
+		return nil, fmtError
+	}
 	restartBytes := block[restartStart:]
+	var previous uint32
+	for i := 0; i < int(restartCount); i++ {
+		off := getU24(restartBytes[3*i:])
+		if off < headerOff+4 || off >= uint32(restartStart) || (i > 0 && off <= previous) {
+			return nil, fmtError
+		}
+		previous = off
+	}
 	block = block[:restartStart]
 
 	br := &blockReader{
