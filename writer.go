@@ -491,12 +491,17 @@ func (w *Writer) finishSection() error {
 		threshold = 1
 	}
 	before := w.Stats.idxStats.Blocks
+	// Build index levels bottom-up. Each flushBlock appends an index record
+	// for the block it wrote, so w.index accumulates the next level up as we
+	// go. The loop stops once the top level is small enough for the reader to
+	// scan linearly (seekLinear walks across blocks), which is what threshold
+	// expresses.
 	for len(w.index) > threshold {
 		maxLevel++
 		indexStart = w.next
-		w.blockWriter = w.newBlockWriter(blockTypeIndex)
 		idx := w.index
 		w.index = nil
+		w.blockWriter = w.newBlockWriter(blockTypeIndex)
 		for _, i := range idx {
 			if w.blockWriter.add(&i) {
 				continue
@@ -510,11 +515,32 @@ func (w *Writer) finishSection() error {
 				panic("fail on fresh block")
 			}
 		}
+
+		// Flush this level's final, partial block. Without this the
+		// pending block is either silently discarded by the next
+		// iteration (losing every entry in it) or flushed after w.index
+		// has been cleared, leaving a stale record that is then written
+		// as the first entry of the *next* section's index.
+		if err := w.flushBlock(); err != nil {
+			return err
+		}
+
+		if len(w.index) >= len(idx) {
+			// The level did not shrink, so no further level can collapse
+			// it either: the keys are large enough that an index block
+			// holds a single entry. Stop instead of looping forever.
+			// See TestTableObjectIDLen for this shape.
+			break
+		}
 	}
-	w.index = nil
+
+	// Flush any block still pending, then drop the index. The remaining
+	// record describes the root index block itself; carrying it into the
+	// next section corrupts that section's index.
 	if err := w.flushBlock(); err != nil {
 		return err
 	}
+	w.index = nil
 
 	blockStats := w.getBlockStats(typ)
 	blockStats.IndexBlocks = w.Stats.idxStats.Blocks - before
