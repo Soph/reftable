@@ -95,6 +95,16 @@ func NewWriter(out io.Writer, cfg *Config) (*Writer, error) {
 	if o.HashID.Size() == 0 {
 		return nil, fmt.Errorf("reftable: unknown hash id %q", string(o.HashID[:]))
 	}
+	version := 1
+	if o.HashID == SHA256ID {
+		version = 2
+	}
+	// Reserve the file header, the four-byte block header, and the
+	// two-byte restart count before initializing the first block writer.
+	minimumBlockSize := uint32(headerSize(version) + 4 + 2)
+	if o.BlockSize < minimumBlockSize {
+		return nil, fmt.Errorf("reftable: block size %d is smaller than minimum %d", o.BlockSize, minimumBlockSize)
+	}
 
 	w := &Writer{
 		cfg:   o,

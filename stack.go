@@ -428,6 +428,12 @@ func (tr *Addition) Add(write func(w *Writer) error) error {
 	}
 
 	if err := tab.Commit(); err != nil {
+		// The table rename may have succeeded before directory sync failed.
+		// It is not in the manifest yet, so remove it explicitly: Close must
+		// preserve published files, and this one is not tracked by tr yet.
+		if tab.Committed() {
+			return errors.Join(err, tr.stack.storage.Remove(dest))
+		}
 		return err
 	}
 

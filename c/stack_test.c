@@ -456,6 +456,98 @@ static void test_reftable_stack_compaction_preserves_addition(void)
 	clear_dir(dir);
 }
 
+static int compaction_read_failure(void *arg, struct reftable_block *dest,
+				   uint64_t off, uint32_t size)
+{
+	struct addition_on_read *hook = arg;
+	/* Let seek and initial iteration succeed, then fail at the third block. */
+	if (off >= 256) {
+		hook->fired = 1;
+		return REFTABLE_IO_ERROR;
+	}
+	return block_source_read_block(&hook->original, dest, off, size);
+}
+
+static int write_compaction_refs(struct reftable_writer *wr, void *arg)
+{
+	int count = *(int *)arg;
+	uint8_t oid[GIT_SHA1_RAWSZ] = { 1 };
+	int i;
+	reftable_writer_set_limits(wr, 1, 1);
+	for (i = 0; i < count; i++) {
+		char name[64];
+		struct reftable_ref_record ref = { NULL };
+		int err;
+		snprintf(name, sizeof(name), "refs/heads/branch%04d", i);
+		ref.refname = name;
+		ref.update_index = 1;
+		ref.value_type = REFTABLE_REF_VAL1;
+		ref.value.val1 = oid;
+		err = reftable_writer_add_ref(wr, &ref);
+		if (err)
+			return err;
+	}
+	return 0;
+}
+
+static void test_reftable_stack_compaction_preserves_read_error(void)
+{
+	char *dir = get_tmp_dir(__LINE__);
+	struct reftable_write_options cfg = { .block_size = 128 };
+	struct reftable_stack *st = NULL, *fresh = NULL;
+	struct reftable_log_expiry_config expiry = { 0 };
+	struct addition_on_read hook = { 0 };
+	struct reftable_block_source_vtable ops = addition_on_read_ops;
+	char **before = NULL, **after = NULL;
+	int count = 9, err, i;
+
+	err = reftable_new_stack(&st, dir, cfg);
+	EXPECT_ERR(err);
+	st->disable_auto_compact = 1;
+	err = reftable_stack_add(st, &write_compaction_refs, &count);
+	EXPECT_ERR(err);
+	/* Three data blocks without an index: the error occurs during iteration,
+	 * not during the initial seek that already propagates errors correctly. */
+	EXPECT(st->readers[0]->ref_offsets.index_offset == 0);
+	EXPECT(st->readers[0]->size > 256);
+	err = read_lines(st->list_file, &before);
+	EXPECT_ERR(err);
+	hook.original = st->readers[0]->source;
+	ops.read_block = compaction_read_failure;
+	st->readers[0]->source.ops = &ops;
+	st->readers[0]->source.arg = &hook;
+
+	/* Non-NULL expiry forces compaction even for a single table. */
+	err = reftable_stack_compact_all(st, &expiry);
+	EXPECT(hook.fired);
+	EXPECT(err == REFTABLE_IO_ERROR);
+	st->readers[0]->source = hook.original;
+	err = read_lines(st->list_file, &after);
+	EXPECT_ERR(err);
+	EXPECT(names_equal(before, after));
+	EXPECT(count_dir_entries(dir) == 2); /* Original table and manifest only. */
+
+	err = reftable_new_stack(&fresh, dir, cfg);
+	EXPECT_ERR(err);
+	for (i = 0; i < count; i++) {
+		char name[64];
+		struct reftable_ref_record ref = { NULL };
+		snprintf(name, sizeof(name), "refs/heads/branch%04d", i);
+		err = reftable_stack_read_ref(st, name, &ref);
+		EXPECT_ERR(err);
+		reftable_ref_record_release(&ref);
+		err = reftable_stack_read_ref(fresh, name, &ref);
+		EXPECT_ERR(err);
+		EXPECT(ref.update_index == 1);
+		reftable_ref_record_release(&ref);
+	}
+	free_names(before);
+	free_names(after);
+	reftable_stack_destroy(fresh);
+	reftable_stack_destroy(st);
+	clear_dir(dir);
+}
+
 static void test_reftable_stack_reload_failure_preserves_readers(void)
 {
 	char *dir = get_tmp_dir(__LINE__);
@@ -1105,6 +1197,7 @@ int stack_test_main(int argc, const char *argv[])
 	RUN_TEST(test_reftable_stack_hash_id);
 	RUN_TEST(test_reftable_stack_lock_failure);
 	RUN_TEST(test_reftable_stack_compaction_preserves_addition);
+	RUN_TEST(test_reftable_stack_compaction_preserves_read_error);
 	RUN_TEST(test_reftable_stack_failed_addition_preserves_lock);
 	RUN_TEST(test_reftable_stack_reload_failure_preserves_readers);
 	RUN_TEST(test_reftable_stack_log_normalize);

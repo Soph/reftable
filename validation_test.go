@@ -6,6 +6,7 @@ package reftable
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -96,6 +97,45 @@ func TestNewWriterRejectsBadConfig(t *testing.T) {
 	// Must be rejected without first allocating a 1GiB block.
 	if _, err := NewWriter(&bytes.Buffer{}, &Config{BlockSize: 1 << 30}); err == nil {
 		t.Error("NewWriter accepted an oversized block size")
+	}
+}
+
+func TestNewWriterRejectsSmallBlocks(t *testing.T) {
+	for _, hashID := range []HashID{NullHashID, SHA1ID, SHA256ID} {
+		version := 1
+		if hashID == SHA256ID {
+			version = 2
+		}
+		// The file header, block header, and restart count must all fit.
+		minimum := uint32(headerSize(version) + 4 + 2)
+		for size := uint32(1); size < minimum; size++ {
+			t.Run(fmt.Sprintf("hash=%x/size=%d", hashID, size), func(t *testing.T) {
+				if _, err := NewWriter(&bytes.Buffer{}, &Config{HashID: hashID, BlockSize: size}); err == nil {
+					t.Fatal("NewWriter accepted a block too small for its headers")
+				}
+			})
+		}
+		for _, size := range []uint32{0, minimum} {
+			t.Run(fmt.Sprintf("hash=%x/valid-size=%d", hashID, size), func(t *testing.T) {
+				w, err := NewWriter(&bytes.Buffer{}, &Config{HashID: hashID, BlockSize: size})
+				if err != nil {
+					t.Fatal(err)
+				}
+				w.SetLimits(1, 1)
+				err = w.AddRef(&RefRecord{RefName: "refs/heads/a", UpdateIndex: 1, Value: make([]byte, hashID.Size())})
+				if size == minimum {
+					// Structurally large enough for headers, but not this record.
+					if err == nil {
+						t.Fatal("expected record-too-large error")
+					}
+				} else if err != nil {
+					t.Fatal(err)
+				}
+				if err := w.Close(); err != nil && !errors.Is(err, ErrEmptyTable) {
+					t.Fatal(err)
+				}
+			})
+		}
 	}
 }
 

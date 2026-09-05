@@ -829,6 +829,10 @@ static int stack_write_compact(struct reftable_stack *st,
 		}
 		entries++;
 	}
+	/* Do not overwrite a ref read/write error with a successful log seek:
+	 * publishing the partial output would permanently drop unread refs. */
+	if (err < 0)
+		goto done;
 	reftable_iterator_destroy(&it);
 
 	err = reftable_merged_table_seek_log(mt, &it, "");

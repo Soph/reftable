@@ -291,6 +291,70 @@ func (s *regressionCommitErrorStorage) LockForWrite(name string) (AtomicWriter, 
 	return w, nil
 }
 
+// Fail the table's directory sync, rather than the manifest's. The table
+// has been renamed but is not yet reachable through tables.list.
+type regressionTableSyncErrorStorage struct {
+	Storage
+	err error
+}
+
+func (s *regressionTableSyncErrorStorage) Update(name string) (AtomicWriter, error) {
+	w, err := s.Storage.Update(name)
+	if err != nil || s.err == nil {
+		return w, err
+	}
+	return &regressionCommitErrorWriter{AtomicWriter: w, err: s.err}, nil
+}
+
+func TestRegressionTableSyncFailureRemovesUnreferencedTable(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing=%v", existing), func(t *testing.T) {
+			dir := t.TempDir()
+			storage := &regressionTableSyncErrorStorage{Storage: NewLocalStorage(dir)}
+			st := regressionStack(t, storage)
+			if existing {
+				regressionAddRef(t, st, "refs/heads/existing")
+			}
+			before, err := storage.ReadDir()
+			if err != nil {
+				t.Fatal(err)
+			}
+			syncErr := errors.New("injected table sync failure after rename")
+			storage.err = syncErr
+			index := st.NextUpdateIndex()
+			err = st.Add(func(w *Writer) error {
+				w.SetLimits(index, index)
+				return w.AddRef(&RefRecord{RefName: "refs/heads/new", UpdateIndex: index, Value: testHash(1)})
+			})
+			if !errors.Is(err, syncErr) {
+				t.Fatalf("Add error = %v, want injected sync error", err)
+			}
+			after, err := storage.ReadDir()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(after) != len(before) {
+				t.Fatalf("failed addition left %d directory entries, want %d", len(after), len(before))
+			}
+			for i := range before {
+				if after[i].Name() != before[i].Name() {
+					t.Fatalf("directory entry changed: %s -> %s", before[i].Name(), after[i].Name())
+				}
+			}
+			fresh := regressionStack(t, NewLocalStorage(dir))
+			if existing {
+				regressionRequireRef(t, fresh.Merged(), "refs/heads/existing")
+			}
+			if ref, err := ReadRef(fresh.Merged(), "refs/heads/new"); err != nil || ref != nil {
+				t.Fatalf("failed addition became visible: %+v, %v", ref, err)
+			}
+			storage.err = nil
+			regressionAddRef(t, st, "refs/heads/new")
+			regressionRequireRef(t, st.Merged(), "refs/heads/new")
+		})
+	}
+}
+
 func TestRegressionCompactedManifestSurvivesSyncError(t *testing.T) {
 	dir := t.TempDir()
 	storage := &regressionCommitErrorStorage{Storage: NewLocalStorage(dir)}
