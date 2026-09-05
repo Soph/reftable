@@ -1,8 +1,10 @@
 package reftable
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -85,5 +87,42 @@ func TestFileWriterCommittedFileSurvivesClose(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(dir, "table.ref"))
 	if err != nil || string(data) != "published" {
 		t.Fatalf("published file changed after Close: %q, %v", data, err)
+	}
+}
+
+// Name() must not start pointing at the final path once an unpublished writer
+// is closed: Remove(w.Name()) would then delete the live file.
+func TestFileWriterNameStableAcrossAbortedClose(t *testing.T) {
+	dir := t.TempDir()
+	s := NewLocalStorage(dir)
+
+	w, err := s.LockForWrite("tables.list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := w.Name()
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if after := w.Name(); after != before {
+		t.Errorf("Name() changed across an aborted Close: %q -> %q", before, after)
+	}
+	if w.Committed() {
+		t.Error("an aborted writer reports Committed")
+	}
+	if !strings.Contains(before, "tables.list") {
+		t.Errorf("unexpected lock name %q", before)
+	}
+}
+
+// ErrLockFailure travels inside errors.Join on published-but-unsynced paths,
+// so it must be matched with errors.Is, never ==.
+func TestLockFailureSurvivesErrorsJoin(t *testing.T) {
+	joined := errors.Join(nil, ErrLockFailure)
+	if joined == ErrLockFailure { //nolint:errorlint // asserting the trap exists
+		t.Skip("errors.Join collapsed to the bare error")
+	}
+	if !errors.Is(joined, ErrLockFailure) {
+		t.Fatal("errors.Is failed to see ErrLockFailure through errors.Join")
 	}
 }

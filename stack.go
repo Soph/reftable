@@ -12,7 +12,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"log"
 	"math"
 	"math/rand"
 	"os"
@@ -91,13 +90,6 @@ func (st *Stack) readNames() ([]string, error) {
 	defer bs.Close()
 
 	data, err := bs.ReadBlock(0, int(bs.Size()))
-	if err != nil {
-		log.Printf("err %v %s %d", err, data, bs.Size())
-		return nil, err
-	}
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -239,8 +231,13 @@ func (st *Stack) reload(reuseOpen bool) error {
 	return ErrLockFailure
 }
 
-// ErrLockFailure is returned for failed writes. On a failed write,
-// the stack is reloaded, so the transaction may be retried.
+// ErrLockFailure is returned for failed writes, and by reload when the
+// on-disk stack kept changing underneath it. The caller may retry the
+// transaction. Note that the stack is not necessarily reloaded: when reload
+// itself is what failed, st.stack still refers to the previous table set.
+//
+// Callers must test with errors.Is: this error is joined with others on
+// paths where the manifest was published but a later step failed.
 var ErrLockFailure = errors.New("reftable: lock failure")
 
 func (st *Stack) UpToDate() (bool, error) {
@@ -264,7 +261,7 @@ func (st *Stack) UpToDate() (bool, error) {
 // Add a new reftable to stack, transactionally.
 func (st *Stack) Add(write func(w *Writer) error) error {
 	if err := st.add(write); err != nil {
-		if err == ErrLockFailure {
+		if errors.Is(err, ErrLockFailure) {
 			st.reload(true)
 		}
 		return err
@@ -418,7 +415,8 @@ func (s *Stack) checkAddition(tabname string) error {
 	}
 	r, err := NewReader(bs, tabname)
 	if err != nil {
-		return err
+		bs.Close()
+		return fmt.Errorf("NewReader(%s): %w", tabname, err)
 	}
 	defer r.Close()
 	it, err := r.SeekRef("")
@@ -656,6 +654,11 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 	if err != nil {
 		return false, err
 	}
+	if len(deleteOnSuccess) == 0 {
+		// Guaranteed by the first > last check above; keep the slice
+		// access below honest if that guard is ever relaxed.
+		return false, nil
+	}
 	start := slices.Index(current, deleteOnSuccess[0])
 	end := start + len(deleteOnSuccess)
 	if start < 0 || end > len(current) || !slices.Equal(current[start:end], deleteOnSuccess) {
@@ -682,7 +685,20 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 
 	// Reload closes and removes superseded tables through Storage. A sync
 	// failure after publication must not roll back the replacement table.
-	return true, errors.Join(err, st.reload(expiration == nil))
+	reloadErr := st.reload(expiration == nil)
+	if reloadErr != nil {
+		// reloadOnce never reached its cleanup, so the tables we just
+		// replaced are unreferenced by the manifest but still on disk.
+		// Nothing else collects them; drop them here.
+		for _, nm := range deleteOnSuccess {
+			if tmpTable != nil && nm == tmpTable.Name() {
+				// Reflog expiry can reuse the name we just published.
+				continue
+			}
+			st.storage.Remove(nm)
+		}
+	}
+	return true, errors.Join(err, reloadErr)
 }
 
 func (st *Stack) tableSizesForCompaction() []uint64 {
