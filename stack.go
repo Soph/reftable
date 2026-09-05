@@ -13,7 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -244,7 +244,7 @@ func (st *Stack) reload(reuseOpen bool) error {
 		}
 
 		// compaction changed names; back off and retry.
-		delay = 2*delay + time.Millisecond*time.Duration(1+rand.Intn(2))
+		delay = 2*delay + time.Millisecond*time.Duration(1+rand.IntN(2))
 		time.Sleep(delay)
 	}
 
@@ -460,11 +460,14 @@ func (s *Stack) checkAddition(tabname string) error {
 	return validateRefRecordAddition(s.Merged(), recs)
 }
 
-// non-deterministic random generator.
-var randomRandom = rand.New(rand.NewSource(time.Now().UnixNano()))
-
+// formatName builds the filename for a table covering [min, max]. The random
+// suffix keeps names unique when several tables cover the same update-index
+// range. rand/v2's top-level source is safe for concurrent use, which matters
+// because one process commonly holds a Stack per repository and writes to them
+// from different goroutines; the old package-level *rand.Rand was not, and
+// torn reads produced duplicate names.
 func formatName(min, max uint64) string {
-	return fmt.Sprintf("0x%012x-0x%012x-%08x", min, max, randomRandom.Uint32())
+	return fmt.Sprintf("0x%012x-0x%012x-%08x", min, max, rand.Uint32())
 }
 
 // NextUpdateIndex returns the update index at which to write the next table.
