@@ -10,11 +10,13 @@ import (
 )
 
 // AtomicWriter is an abstraction for a {write to temp, close, rename}
-// file sink.
+// file sink. Close aborts unpublished output and must be idempotent.
 type AtomicWriter interface {
 	io.WriteCloser
 	Name() string
 	Commit() error
+	// Committed reports whether the new file has been published, even if
+	// Commit returned a subsequent durability error. Close must not remove it.
 	Committed() bool
 }
 
@@ -36,28 +38,35 @@ type Storage interface {
 
 type fileWriter struct {
 	finalName string
+	tempName  string
+	committed bool
 	*os.File
 }
 
 func (fw *fileWriter) Committed() bool {
-	return fw.File == nil
+	return fw.committed
 }
 
 func (fw *fileWriter) Name() string {
-	if fw.File != nil {
-		return filepath.Base(fw.File.Name())
+	if fw.tempName != "" {
+		return filepath.Base(fw.tempName)
 	}
 
 	return filepath.Base(fw.finalName)
 }
 
 func (fw *fileWriter) Close() error {
-	if fw.File == nil {
-		return nil
+	var closeErr, removeErr error
+	if fw.File != nil {
+		closeErr = fw.File.Close()
+		fw.File = nil
 	}
-	err1 := fw.File.Close()
-	err2 := os.Remove(fw.File.Name())
-	return cmp.Or(err1, err2)
+	if fw.tempName != "" {
+		name := fw.tempName
+		fw.tempName = ""
+		removeErr = os.Remove(name)
+	}
+	return cmp.Or(closeErr, removeErr)
 }
 
 // fsyncDir flushes the directory entry for path.
@@ -71,19 +80,22 @@ func fsyncDir(path string) error {
 }
 
 func (fw *fileWriter) Commit() error {
+	if fw.File == nil {
+		return os.ErrClosed
+	}
 	if err := fw.File.Sync(); err != nil {
 		return err
 	}
-	if err := fw.File.Close(); err != nil {
-		return err
-	}
-
-	err := os.Rename(fw.File.Name(), fw.finalName)
+	err := fw.File.Close()
 	fw.File = nil
 	if err != nil {
 		return err
 	}
-
+	if err := os.Rename(fw.tempName, fw.finalName); err != nil {
+		return err
+	}
+	fw.tempName = ""
+	fw.committed = true
 	return fsyncDir(filepath.Dir(fw.finalName))
 }
 
@@ -92,7 +104,7 @@ func newLockForWrite(path string) (AtomicWriter, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &fileWriter{File: f, finalName: path}, nil
+	return &fileWriter{File: f, finalName: path, tempName: f.Name()}, nil
 }
 
 func newAtomicWriter(path string) (AtomicWriter, error) {
@@ -101,7 +113,7 @@ func newAtomicWriter(path string) (AtomicWriter, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &fileWriter{File: f, finalName: path}, nil
+	return &fileWriter{File: f, finalName: path, tempName: f.Name()}, nil
 }
 
 func NewLocalStorage(dir string) *localStorage {

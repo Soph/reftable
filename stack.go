@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 )
@@ -146,14 +147,16 @@ func (st *Stack) reloadOnce(names []string, reuseOpen bool) error {
 		cur[r.Name()] = r
 	}
 
-	var newTables []*Reader
+	var newTables, opened []*Reader
+	retained := make(map[string]bool, len(names))
 	defer func() {
-		for _, t := range newTables {
+		for _, t := range opened {
 			t.Close()
 		}
 	}()
 
 	for _, name := range names {
+		retained[name] = true
 		rd := cur[name]
 		if reuseOpen && rd != nil {
 			delete(cur, name)
@@ -165,21 +168,36 @@ func (st *Stack) reloadOnce(names []string, reuseOpen bool) error {
 
 			rd, err = NewReader(bs, name)
 			if err != nil {
-				return fmt.Errorf("NewReader(%s): %v", name, err)
+				bs.Close()
+				return fmt.Errorf("NewReader(%s): %w", name, err)
 			}
+			opened = append(opened, rd)
 		}
 		newTables = append(newTables, rd)
 	}
 
-	// success. Swap.
+	var tabs []Table
+	for _, r := range newTables {
+		tabs = append(tabs, r)
+	}
+	merged, err := NewMerged(tabs, st.cfg.HashID)
+	if err != nil {
+		return err
+	}
+	merged.suppressDeletions = true
+
+	// Only transfer ownership once the entire replacement is valid.
 	st.stack = newTables
-	newTables = nil
+	st.merged = merged
+	opened = nil
 	for _, old := range cur {
 		old.Close()
 
 		// On windows, we may only be able to close after
 		// closing file handles.
-		st.storage.Remove(old.Name())
+		if !retained[old.Name()] {
+			st.storage.Remove(old.Name())
+		}
 	}
 	return nil
 }
@@ -199,7 +217,7 @@ func (st *Stack) reload(reuseOpen bool) error {
 		}
 		err = st.reloadOnce(names, reuseOpen)
 		if err == nil {
-			break
+			return nil
 		}
 		if !errors.Is(err, os.ErrNotExist) {
 			return err
@@ -218,18 +236,7 @@ func (st *Stack) reload(reuseOpen bool) error {
 		time.Sleep(delay)
 	}
 
-	var tabs []Table
-	for _, r := range st.stack {
-		tabs = append(tabs, r)
-	}
-
-	m, err := NewMerged(tabs, st.cfg.HashID)
-	if err != nil {
-		return err
-	}
-	m.suppressDeletions = true
-	st.merged = m
-	return nil
+	return ErrLockFailure
 }
 
 // ErrLockFailure is returned for failed writes. On a failed write,
@@ -374,6 +381,7 @@ func (tr *Addition) Close() {
 	for _, nm := range tr.newTables {
 		tr.stack.storage.Remove(nm)
 	}
+	tr.newTables = nil
 	tr.lockFile.Close()
 }
 
@@ -389,13 +397,15 @@ func (tr *Addition) Commit() error {
 		return err
 	}
 
-	if err := tr.lockFile.Commit(); err != nil {
+	err := tr.lockFile.Commit()
+	if err != nil && !tr.lockFile.Committed() {
 		tr.Close()
 		return err
 	}
+	// Rename may succeed even when the following directory sync fails.
+	// Published tables belong to the manifest and must survive cleanup.
 	tr.newTables = nil
-
-	return tr.stack.reload(true)
+	return errors.Join(err, tr.stack.reload(true))
 }
 
 func (s *Stack) checkAddition(tabname string) error {
@@ -567,7 +577,7 @@ func (st *Stack) compactRangeStats(first, last int, expiration *LogExpirationCon
 }
 
 func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) (bool, error) {
-	if first >= last && expiration == nil {
+	if first > last || (first == last && expiration == nil) {
 		return true, nil
 	}
 	st.Stats.Attempts++
@@ -580,9 +590,7 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 		return false, err
 	}
 
-	defer func() {
-		lock.Close()
-	}()
+	defer lock.Close()
 
 	if ok, err := st.UpToDate(); !ok || err != nil {
 		return false, err
@@ -622,64 +630,59 @@ func (st *Stack) compactRange(first, last int, expiration *LogExpirationConfig) 
 	if err != nil {
 		return false, err
 	}
+	published := false
 	if tmpTable != nil {
-		defer tmpTable.Close()
+		defer func() {
+			if !published && tmpTable.Committed() {
+				st.storage.Remove(tmpTable.Name())
+			}
+			tmpTable.Close()
+		}()
 	}
 
 	lock, err = st.storage.LockForWrite(listFileName)
+	if errors.Is(err, os.ErrExist) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
-
 	defer lock.Close()
 
+	// Other writers can append or compact unrelated tables while the global
+	// lock is released. Replace only our still-contiguous range in the latest
+	// manifest, preserving every change outside it.
+	current, err := st.readNames()
+	if err != nil {
+		return false, err
+	}
+	start := slices.Index(current, deleteOnSuccess[0])
+	end := start + len(deleteOnSuccess)
+	if start < 0 || end > len(current) || !slices.Equal(current[start:end], deleteOnSuccess) {
+		return false, nil
+	}
+	var names []string
+	names = append(names, current[:start]...)
 	if tmpTable != nil {
 		if err := tmpTable.Commit(); err != nil {
 			return false, err
 		}
-	}
-
-	var names []string
-	for i := range first {
-		names = append(names, st.stack[i].name)
-	}
-
-	if tmpTable != nil {
 		names = append(names, tmpTable.Name())
 	}
-
-	for i := last + 1; i < len(st.stack); i++ {
-		names = append(names, st.stack[i].name)
-	}
+	names = append(names, current[end:]...)
 
 	if _, err := lock.Write([]byte(strings.Join(names, "\n"))); err != nil {
-		if tmpTable != nil {
-			os.Remove(tmpTable.Name())
-		}
 		return false, err
 	}
-	if err := lock.Commit(); err != nil {
-		if tmpTable != nil {
-			os.Remove(tmpTable.Name())
-		}
+	err = lock.Commit()
+	published = err == nil || lock.Committed()
+	if !published {
 		return false, err
 	}
 
-	for _, nm := range deleteOnSuccess {
-		if tmpTable != nil && nm != tmpTable.Name() {
-			// reflog expiry might cause us to reopen a
-			// new file with the same name.
-			os.Remove(nm)
-		}
-	}
-
-	// If we expire log entries on a full compaction we write a
-	// table with the same the (min,max) update index, but we have
-	// to read from disk again.
-	if err := st.reload(expiration == nil); err != nil {
-		return true, fmt.Errorf("reload: %w", err)
-	}
-	return true, err
+	// Reload closes and removes superseded tables through Storage. A sync
+	// failure after publication must not roll back the replacement table.
+	return true, errors.Join(err, st.reload(expiration == nil))
 }
 
 func (st *Stack) tableSizesForCompaction() []uint64 {

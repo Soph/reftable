@@ -264,10 +264,13 @@ func (i *tableIter) Next(rec record) (bool, error) {
 // extractBlockSize returns the block size from the block header
 func extractBlockSize(block []byte, off uint64, version int) (typ byte, size uint32, err error) {
 	if off == 0 {
+		if len(block) < headerSize(version) {
+			return 0, 0, fmtError
+		}
 		block = block[headerSize(version):]
 	}
 
-	if !isBlockType(block[0]) {
+	if len(block) < 4 || !isBlockType(block[0]) {
 		return 0, 0, fmtError
 	}
 
@@ -590,6 +593,7 @@ func (i *indexedTableRefIter) Next(rec record) (bool, error) {
 		}
 
 		if bytes.Compare(ref.Value, i.oid) == 0 || bytes.Compare(ref.TargetValue, i.oid) == 0 {
+			ref.UpdateIndex += i.r.header.MinUpdateIndex
 			return true, nil
 		}
 	}
