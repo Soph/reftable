@@ -196,6 +196,15 @@ func newBlockReader(block []byte, headerOff uint32, tableBlockSize uint32, hashS
 	}
 
 	if typ == blockTypeLog {
+		// sz is a 3-byte field read straight from the block header, and is
+		// deliberately not bounded by len(block) above because a log block
+		// declares its *decompressed* size. Bound it by what this input
+		// could possibly produce: DEFLATE cannot expand by more than
+		// 1032:1, so anything larger is malformed. Without this a ~40 byte
+		// table can reserve 16MiB up front, before a byte is decompressed.
+		if uint64(sz) > uint64(len(block))*maxDeflateRatio {
+			return nil, fmtError
+		}
 		decompress := make([]byte, 0, sz)
 		buf := bytes.NewBuffer(block)
 		out := bytes.NewBuffer(decompress)
@@ -211,9 +220,11 @@ func newBlockReader(block []byte, headerOff uint32, tableBlockSize uint32, hashS
 			return nil, err
 		}
 		defer r.Close()
-		// Read one byte beyond the declared payload size to detect oversized
-		// streams without unbounded allocation. Valid streams reach EOF and
-		// consume the zlib trailer, preserving compressed-block accounting.
+		// Read one byte beyond the declared payload size so an oversized
+		// stream is detected by the out.Len() != sz check below rather than
+		// being decompressed in full. Valid streams reach EOF within the
+		// limit and consume the zlib trailer, so the compressed-block
+		// accounting below (before - buf.Len()) stays correct.
 		limit := int64(sz) - int64(headerOff) - 4 + 1
 		if _, err := io.Copy(out, io.LimitReader(r, limit)); err != nil {
 			return nil, err

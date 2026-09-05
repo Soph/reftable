@@ -86,13 +86,19 @@ func (cfg *Config) setDefaults() {
 func NewWriter(out io.Writer, cfg *Config) (*Writer, error) {
 	o := *cfg
 	o.setDefaults()
+
+	// Validate before allocating: BlockSize is caller-supplied, so checking
+	// after make() lets Config{BlockSize: 1<<30} reserve 1GiB and then fail.
+	if o.BlockSize >= (1 << 24) {
+		return nil, errors.New("reftable: invalid blocksize")
+	}
+	if o.HashID.Size() == 0 {
+		return nil, fmt.Errorf("reftable: unknown hash id %q", string(o.HashID[:]))
+	}
+
 	w := &Writer{
 		cfg:   o,
 		block: make([]byte, o.BlockSize),
-	}
-
-	if cfg.BlockSize >= (1 << 24) {
-		return nil, errors.New("reftable: invalid blocksize")
 	}
 
 	w.paddedWriter.out = out
