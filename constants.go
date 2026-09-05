@@ -35,3 +35,8 @@ const blockTypeObj = 'o'
 const blockTypeAny = 0
 
 const maxRestarts = (1 << 16) - 1
+
+// maxDeflateRatio is the theoretical maximum expansion of a DEFLATE stream.
+// Used to reject log blocks whose declared decompressed size cannot possibly
+// be produced by the compressed bytes actually present.
+const maxDeflateRatio = 1032

@@ -79,6 +79,21 @@ func (st *Stack) String() string {
 	return fmt.Sprintf("%v", nms)
 }
 
+// validateTableName rejects manifest entries that would escape the reftable
+// directory. Storage implementations join these names onto a base directory,
+// and filepath.Join cleans "..", so an unvalidated name from tables.list can
+// address — and Remove — arbitrary files. Table names are always plain
+// filenames, so refusing separators and dot components is sufficient.
+func validateTableName(name string) error {
+	if name == "" || name == "." || name == ".." {
+		return fmt.Errorf("%w: invalid table name %q", fmtError, name)
+	}
+	if strings.ContainsAny(name, `/\`) || strings.Contains(name, "\x00") {
+		return fmt.Errorf("%w: table name %q must be a plain filename", fmtError, name)
+	}
+	return nil
+}
+
 func (st *Stack) readNames() ([]string, error) {
 	bs, err := st.storage.OpenBlockSource(listFileName)
 	if errors.Is(err, os.ErrNotExist) {
@@ -97,9 +112,14 @@ func (st *Stack) readNames() ([]string, error) {
 
 	var res []string
 	for _, l := range lines {
-		if len(l) > 0 {
-			res = append(res, string(l))
+		if len(l) == 0 {
+			continue
 		}
+		name := string(l)
+		if err := validateTableName(name); err != nil {
+			return nil, err
+		}
+		res = append(res, name)
 	}
 
 	return res, nil

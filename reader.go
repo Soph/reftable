@@ -166,11 +166,17 @@ func NewReader(src BlockSource, name string) (*Reader, error) {
 		return nil, err
 	}
 
+	// The hash ID is 4 raw bytes out of the file. Validate it before use:
+	// this runs before the CRC is compared below, so an unknown value here
+	// is reachable with no valid checksum at all.
 	r.hashSize = r.header.HashID.Size()
+	if r.hashSize == 0 {
+		return nil, fmt.Errorf("%w: unknown hash id %q", fmtError, string(r.header.HashID[:]))
+	}
 	r.header.BlockSize &= (1 << 24) - 1
 
 	if footBuf.Len() > 0 {
-		log.Panicf("footer size %d", footBuf.Len())
+		return nil, fmt.Errorf("%w: trailing footer bytes: %d", fmtError, footBuf.Len())
 	}
 
 	r.objectIDLen = int(r.footer.ObjOffset & ((1 << 5) - 1))
