@@ -67,6 +67,10 @@ func TestSeekLogRejectsInvalidIndexTargets(t *testing.T) {
 		{"target_ref_block", 0, original.size, true},
 		{"root_past_eof", logOffset, math.MaxUint64, true},
 		{"root_log_block", logOffset, logOffset, true},
+		// The fixture block sits at original.size, so pointing its single
+		// entry at that same offset makes the index reference itself. Without
+		// the maxIndexDepth bound in seekIndexed this descends forever.
+		{"cyclic_index", original.size, original.size, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := readerWithLogIndexTarget(t, original, want.key(), tc.target, tc.rootOffset)
