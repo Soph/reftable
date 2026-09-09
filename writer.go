@@ -544,12 +544,14 @@ func (w *Writer) finishSection() error {
 		}
 	}
 
-	// Flush any block still pending, then drop the index. The remaining
-	// record describes the root index block itself; carrying it into the
-	// next section corrupts that section's index.
-	if err := w.flushBlock(); err != nil {
-		return err
-	}
+	// No flush is needed here. Every path above leaves w.blockWriter either
+	// nil or holding zero entries, and flushBlock returns early for both:
+	// each loop iteration ends by flushing its level, and the flush at the
+	// top of this function already handled the section's last data block.
+	//
+	// Drop the index. Its remaining records describe this section's own
+	// top-level index blocks; carrying them into the next section would
+	// write them as that section's first index entries.
 	w.index = nil
 
 	blockStats := w.getBlockStats(typ)
