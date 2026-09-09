@@ -289,7 +289,13 @@ func postCommitError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if _, ok := err.(*PostCommitError); ok {
+	// errors.As, not a type assertion: callers reach here through
+	// errors.Join and fmt.Errorf("%w", ...), so the PostCommitError is
+	// frequently wrapped rather than the top-level value. A bare assertion
+	// misses those and wraps a second time, and the whole point of this type
+	// is that a committed write is not reclassified as retryable.
+	var pce *PostCommitError
+	if errors.As(err, &pce) {
 		return err
 	}
 	return &PostCommitError{Cause: err}

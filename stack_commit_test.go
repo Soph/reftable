@@ -169,3 +169,57 @@ func TestEmptyAdditionDoesNotReportPublication(t *testing.T) {
 		t.Fatalf("nothing was published: got %v, want retryable maintenance error", err)
 	}
 }
+
+// postCommitError classifies whether a write survived publication, so it must
+// recognise a PostCommitError that arrives wrapped. It reaches this function
+// through errors.Join and fmt.Errorf("%w", ...) on the compaction and addition
+// paths, and a bare type assertion misses both and wraps a second time.
+func TestPostCommitErrorDoesNotDoubleWrap(t *testing.T) {
+	if got := postCommitError(nil); got != nil {
+		t.Errorf("postCommitError(nil) = %v, want nil", got)
+	}
+
+	cause := errors.New("directory sync failed")
+	once := postCommitError(cause)
+
+	var first *PostCommitError
+	if !errors.As(once, &first) {
+		t.Fatalf("postCommitError(%v) is not a *PostCommitError", cause)
+	}
+	if !errors.Is(once, ErrPostCommit) {
+		t.Fatal("a post-commit error must satisfy errors.Is(err, ErrPostCommit)")
+	}
+
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"bare", once},
+		{"joined_with_nil", errors.Join(once, nil)},
+		{"joined_with_error", errors.Join(once, errors.New("reload failed"))},
+		{"fmt_wrapped", fmt.Errorf("compact: %w", once)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := postCommitError(tc.err)
+
+			if !errors.Is(got, ErrPostCommit) {
+				t.Fatalf("lost the post-commit classification: %v", got)
+			}
+
+			var outer *PostCommitError
+			if !errors.As(got, &outer) {
+				t.Fatalf("no *PostCommitError in %v", got)
+			}
+			var inner *PostCommitError
+			if errors.As(outer.Cause, &inner) {
+				t.Errorf("wrapped a second time: Cause is itself a *PostCommitError (%v)", outer.Cause)
+			}
+			// Note: Unwrap returns ErrPostCommit, not Cause, so the
+			// underlying error is reachable through the exported field
+			// rather than errors.Is.
+			if !errors.Is(outer.Cause, cause) {
+				t.Errorf("Cause = %v, want the original %v", outer.Cause, cause)
+			}
+		})
+	}
+}
