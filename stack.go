@@ -933,7 +933,8 @@ func (st *Stack) Clean() error {
 
 		rd, err := NewReader(bs, name)
 		if err != nil {
-			return fmt.Errorf("NewReader(%s): %v", name, err)
+			bs.Close()
+			return fmt.Errorf("NewReader(%s): %w", name, err)
 		}
 
 		cur := rd.MaxUpdateIndex()

@@ -237,7 +237,7 @@ func (i *tableIter) nextInBlock(rec record) (bool, error) {
 		}
 	}
 	if err != nil {
-		err = fmt.Errorf("block %c, off %d: %v", i.typ, i.blockOff, err)
+		err = fmt.Errorf("block %c, off %d: %w", i.typ, i.blockOff, err)
 	}
 	return ok, err
 }
@@ -343,7 +343,7 @@ func (i *tableIter) nextBlock() (bool, error) {
 	nextBlockOff := i.blockOff + uint64(i.bi.br.fullBlockSize)
 	br, err := i.r.newBlockReader(nextBlockOff, i.typ)
 	if err != nil {
-		return false, fmt.Errorf("reftable: reading %c block at 0x%x: %v", i.typ, nextBlockOff, err)
+		return false, fmt.Errorf("reftable: reading %c block at 0x%x: %w", i.typ, nextBlockOff, err)
 	}
 	if br == nil {
 		i.finished = true

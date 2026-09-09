@@ -204,7 +204,7 @@ func (m *Merged) seekRecord(rec record) (iterator, error) {
 	for _, t := range m.stack {
 		iter, err := t.seekRecord(rec)
 		if err != nil {
-			return nil, fmt.Errorf("reftable: seek %s: %v", t.Name(), err)
+			return nil, fmt.Errorf("reftable: seek %s: %w", t.Name(), err)
 		}
 		its = append(its, iter)
 		names = append(names, t.Name())
@@ -243,7 +243,7 @@ func (it *mergedIter) init() error {
 		rec := newRecord(it.typ, "")
 		ok, err := sub.Next(rec)
 		if err != nil {
-			return fmt.Errorf("init %s: %v", it.names[i], err)
+			return fmt.Errorf("init %s: %w", it.names[i], err)
 		}
 		if ok {
 			it.pq.add(pqEntry{
@@ -267,7 +267,7 @@ func (m *mergedIter) advanceSubIter(index int) error {
 	r := newRecord(m.typ, "")
 	ok, err := m.stack[index].Next(r)
 	if err != nil {
-		return fmt.Errorf("next %s: %v", m.names[index], err)
+		return fmt.Errorf("next %s: %w", m.names[index], err)
 	}
 
 	if !ok {
